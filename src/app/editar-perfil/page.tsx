@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
-const classes = ["Iniciante", "2ª Classe", "1ª Classe", "Especial", "Profissional"];
+const classes = [1, 2, 3, 4, 5, 6];
 
 type FormData = {
   fullName: string;
@@ -13,6 +13,11 @@ type FormData = {
   phone: string;
   classNumber: string;
 };
+
+function normalizeClass(value: unknown) {
+  const match = String(value ?? "").match(/[1-6]/);
+  return match?.[0] ?? "";
+}
 
 export default function EditarPerfilPage() {
   const router = useRouter();
@@ -32,11 +37,17 @@ export default function EditarPerfilPage() {
       }
 
       const metadata = user.user_metadata ?? {};
+      const { data: athlete } = await supabase
+        .from("athletes")
+        .select("current_class")
+        .eq("user_id", user.id)
+        .maybeSingle();
+
       setForm({
         fullName: metadata.full_name ?? "",
         birthDate: metadata.birth_date ?? "",
         phone: metadata.phone ?? "",
-        classNumber: metadata.class_number ?? "",
+        classNumber: normalizeClass(athlete?.current_class ?? metadata.class_number),
       });
       setLoading(false);
     };
@@ -57,6 +68,12 @@ export default function EditarPerfilPage() {
     setSuccess("");
 
     const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      router.replace("/login");
+      return;
+    }
+
     const { error: updateError } = await supabase.auth.updateUser({
       data: {
         full_name: form.fullName.trim(),
@@ -68,6 +85,17 @@ export default function EditarPerfilPage() {
 
     if (updateError) {
       setError("Não foi possível salvar as alterações. Tente novamente.");
+      setSaving(false);
+      return;
+    }
+
+    const { error: athleteError } = await supabase
+      .from("athletes")
+      .update({ current_class: Number(form.classNumber) })
+      .eq("user_id", user.id);
+
+    if (athleteError) {
+      setError("Os dados da conta foram salvos, mas não foi possível atualizar a classe do atleta.");
       setSaving(false);
       return;
     }
@@ -112,7 +140,7 @@ export default function EditarPerfilPage() {
             Classe que você joga
             <select value={form.classNumber} onChange={(event) => update("classNumber", event.target.value)} required className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-emerald-400">
               <option value="">Selecione sua classe</option>
-              {classes.map((item) => <option key={item} value={item}>{item}</option>)}
+              {classes.map((item) => <option key={item} value={String(item)}>{item}ª Classe</option>)}
             </select>
           </label>
 
