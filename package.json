@@ -1,0 +1,56 @@
+{
+  "name": "app-ranking-smash",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Aplicativo de gerenciamento do Ranking Smash, temporadas, rodadas, partidas e classificações de tênis.",
+  "license": "UNLICENSED",
+  "author": "Ranking Smash",
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "lint:fix": "next lint --fix",
+    "type-check": "tsc --noEmit",
+    "check": "npm run type-check && npm run lint && npm run build",
+    "clean": "node -e \"const fs=require('fs');['.next','out','coverage'].forEach((dir)=>fs.rmSync(dir,{recursive:true,force:true}))\""
+  },
+  "dependencies": {
+    "@supabase/ssr": "^0.5.2",
+    "@supabase/supabase-js": "^2.47.10",
+    "clsx": "^2.1.1",
+    "date-fns": "^4.1.0",
+    "lucide-react": "^0.468.0",
+    "next": "14.2.22",
+    "openai": "^4.77.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "tailwind-merge": "^2.6.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.10",
+    "@types/react": "^18.3.17",
+    "@types/react-dom": "^18.3.5",
+    "autoprefixer": "^10.4.20",
+    "eslint": "^8.57.1",
+    "eslint-config-next": "14.2.22",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.7.2"
+  },
+  "keywords": [
+    "ranking",
+    "smash",
+    "tenis",
+    "esportes",
+    "nextjs",
+    "react",
+    "supabase",
+    "tailwindcss"
+  ]
+}
