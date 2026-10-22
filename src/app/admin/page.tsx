@@ -7,6 +7,8 @@ import Navigation from "@/components/Navigation";
 import { createClient } from "@/lib/supabase/client";
 
 const ADMIN_EMAIL = "eng.durvalneto@gmail.com";
+type RoleRow = { role: string | null };
+type RoleQueryResult = { data: RoleRow | null; error: { message: string } | null };
 
 export default function AdminPage() {
   const [checking, setChecking] = useState(true);
@@ -20,11 +22,11 @@ export default function AdminPage() {
         setChecking(false);
         return;
       }
-      const { data: roleRow } = await supabase
+      const { data: roleRow } = (await supabase
         .from("user_roles")
         .select("role")
         .eq("user_id", user.id)
-        .maybeSingle();
+        .maybeSingle()) as unknown as RoleQueryResult;
       const isAdmin = user.email?.toLowerCase() === ADMIN_EMAIL || roleRow?.role === "admin" || user.app_metadata?.role === "admin";
       setAuthorized(Boolean(isAdmin));
       setChecking(false);

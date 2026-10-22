@@ -7,6 +7,8 @@ import { createClient } from "@/lib/supabase/client";
 
 const ADMIN_EMAIL = "eng.durvalneto@gmail.com";
 const links = [["/dashboard", "Início"], ["/partidas", "Partidas"], ["/classificacao", "Classificação"], ["/temporadas", "Temporadas"], ["/historico", "Histórico"], ["/notificacoes", "Notificações"]] as const;
+type RoleRow = { role: string | null };
+type RoleQueryResult = { data: RoleRow | null; error: { message: string } | null };
 
 export default function Navigation() {
   const pathname = usePathname();
@@ -21,7 +23,7 @@ export default function Navigation() {
     const load = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-      const { data: roleRow } = await supabase.from("user_roles").select("role").eq("user_id", user.id).maybeSingle();
+      const { data: roleRow } = (await supabase.from("user_roles").select("role").eq("user_id", user.id).maybeSingle()) as unknown as RoleQueryResult;
       if (mounted) {
         setUserEmail(user.email?.toLowerCase() ?? null);
         setIsAdmin(user.email?.toLowerCase() === ADMIN_EMAIL || roleRow?.role === "admin" || user.app_metadata?.role === "admin");
