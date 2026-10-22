@@ -7,6 +7,10 @@ export const metadata = {
   description: "Visualize seus dados de atleta no Ranking Smash.",
 };
 
+type ProfileRecord = {
+  full_name: string | null;
+};
+
 export default async function PerfilPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -15,11 +19,11 @@ export default async function PerfilPage() {
     return null;
   }
 
-  const { data: profile } = await supabase
+  const { data: profile } = (await supabase
     .from("profiles")
     .select("full_name")
     .eq("id", user.id)
-    .maybeSingle();
+    .maybeSingle()) as { data: ProfileRecord | null };
 
   const fullName = profile?.full_name ?? user.user_metadata?.full_name ?? user.email?.split("@")[0] ?? "Atleta";
   const initials = fullName
