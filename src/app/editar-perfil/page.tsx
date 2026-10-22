@@ -14,6 +14,13 @@ type FormData = {
   classNumber: string;
 };
 
+type AthleteRecord = { current_class: number | null };
+
+type AthleteQueryResult = {
+  data: AthleteRecord | null;
+  error: { message: string } | null;
+};
+
 function normalizeClass(value: unknown) {
   const match = String(value ?? "").match(/[1-6]/);
   return match?.[0] ?? "";
@@ -37,11 +44,11 @@ export default function EditarPerfilPage() {
       }
 
       const metadata = user.user_metadata ?? {};
-      const { data: athlete } = await supabase
+      const { data: athlete } = (await supabase
         .from("athletes")
         .select("current_class")
         .eq("user_id", user.id)
-        .maybeSingle();
+        .maybeSingle()) as unknown as AthleteQueryResult;
 
       setForm({
         fullName: metadata.full_name ?? "",
