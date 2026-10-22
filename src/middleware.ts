@@ -1,14 +1,15 @@
 import { createServerClient } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
-
 import type { Database } from "@/types/database";
 
+const ADMIN_EMAIL = "eng.durvalneto@gmail.com";
 const AUTH_ROUTES = ["/login", "/cadastro", "/esqueci-minha-senha"];
 const PROTECTED_ROUTES = ["/dashboard", "/perfil", "/partidas", "/classificacao", "/notificacoes", "/historico"];
 const ADMIN_ROUTES = ["/admin"];
 
 type CookieToSet = { name: string; value: string; options?: unknown };
-type ProfileRoleRow = { role: "admin" | "athlete" };
+type ProfileRoleRow = { role?: "admin" | "atleta" | "user" | null };
+type RoleRow = { role?: string | null };
 
 function matchesRoute(pathname: string, routes: string[]) {
   return routes.some((route) => pathname === route || pathname.startsWith(`${route}/`));
@@ -28,15 +29,11 @@ export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request: { headers: request.headers } });
   const supabase = createServerClient<Database>(supabaseUrl, supabaseAnonKey, {
     cookies: {
-      getAll() {
-        return request.cookies.getAll();
-      },
+      getAll() { return request.cookies.getAll(); },
       setAll(cookiesToSet: CookieToSet[]) {
         cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
         response = NextResponse.next({ request: { headers: request.headers } });
-        cookiesToSet.forEach(({ name, value, options }) => {
-          response.cookies.set(name, value, options as Parameters<typeof response.cookies.set>[2]);
-        });
+        cookiesToSet.forEach(({ name, value, options }) => response.cookies.set(name, value, options as Parameters<typeof response.cookies.set>[2]));
       },
     },
   });
@@ -50,8 +47,7 @@ export async function middleware(request: NextRequest) {
   if ((isProtectedRoute || isAdminRoute) && (error || !user)) {
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = "/login";
-    loginUrl.search = "";
-    loginUrl.searchParams.set("next", `${request.nextUrl.pathname}${request.nextUrl.search}`);
+    loginUrl.search = `?next=${request.nextUrl.pathname}${request.nextUrl.search}`;
     return redirectWithCookies(loginUrl, response);
   }
 
@@ -63,11 +59,19 @@ export async function middleware(request: NextRequest) {
   }
 
   if (isAdminRoute && user) {
-    const metadataRole = typeof user.app_metadata?.role === "string" ? user.app_metadata.role : null;
-    let isAdmin = metadataRole === "admin";
-    const { data: profileData, error: profileError } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
-    const profile = profileData as ProfileRoleRow | null;
-    if (!profileError && profile) isAdmin = profile.role === "admin";
+    const emailIsAdmin = user.email?.trim().toLowerCase() === ADMIN_EMAIL;
+    let isAdmin = emailIsAdmin;
+
+    if (!isAdmin) {
+      const { data: roleData, error: roleError } = await supabase
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      const roleRow = roleData as RoleRow | null;
+      isAdmin = !roleError && roleRow?.role?.trim().toLowerCase() === "admin";
+    }
+
     if (!isAdmin) {
       const dashboardUrl = request.nextUrl.clone();
       dashboardUrl.pathname = "/dashboard";
