@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 type Match = { id: string; season_id: string; round_id: string; athlete_one_id: string; athlete_two_id: string | null; status: string; result_type: string | null; athlete_one_sets: number | null; athlete_two_sets: number | null; athlete_one_games: number | null; athlete_two_games: number | null; athlete_one_points: number | null; athlete_two_points: number | null; winner_athlete_id: string | null };
 type Athlete = { id: string; user_id: string; current_class: number; status: string };
 type Round = { id: string; round_number: number; status: string };
+type SeasonRef = { id: string };
 type AnyTable = any;
 
 const editableStatuses = ["scheduled", "pending", "awaiting_result", "contested", "result_submitted", "walkover"];
@@ -16,13 +17,17 @@ export default function QuickMatchResult() {
 
   async function loadMatch() {
     setLoading(true); setError("");
-    const { data: { user } } = await supabase.auth.getUser(); if (!user) { setLoading(false); return; }
+    const { data: authData } = await supabase.auth.getUser(); const user = authData.user;
+    if (!user) { setLoading(false); return; }
     const athletesTable: AnyTable = supabase.from("athletes");
     const { data: athleteData, error: athleteError } = await athletesTable.select("id,user_id,current_class,status").eq("user_id", user.id).maybeSingle();
     if (athleteError) { setError("Não foi possível carregar o atleta."); setLoading(false); return; }
-    const currentAthlete = athleteData as Athlete | null; if (!currentAthlete) { setLoading(false); return; }
-    const { data: season } = await supabase.from("seasons").select("id").eq("status", "active").order("year", { ascending: false }).limit(1).maybeSingle();
-    if (!season) { setAthlete(currentAthlete); setLoading(false); return; }
+    const currentAthlete = athleteData as Athlete | null;
+    if (!currentAthlete) { setLoading(false); return; }
+    const seasonsTable: AnyTable = supabase.from("seasons");
+    const { data: seasonData, error: seasonError } = await seasonsTable.select("id").eq("status", "active").order("year", { ascending: false }).limit(1).maybeSingle();
+    const season = seasonData as SeasonRef | null;
+    if (seasonError || !season) { setAthlete(currentAthlete); setLoading(false); return; }
     const roundsTable: AnyTable = supabase.from("rounds");
     const { data: roundData, error: roundError } = await roundsTable.select("id,round_number,status").eq("season_id", season.id).in("status", ["open", "closed"]).order("round_number", { ascending: false }).limit(1).maybeSingle();
     if (roundError || !roundData) { setAthlete(currentAthlete); setLoading(false); return; }
@@ -61,16 +66,18 @@ export default function QuickMatchResult() {
     const matchesTable: AnyTable = supabase.from("matches");
     const { error: matchError } = await matchesTable.update(payload).eq("id", match.id).eq("round_id", round.id);
     if (matchError) { setError(`Não foi possível salvar o resultado: ${matchError.message}`); setSaving(false); return; }
-    await supabase.from("match_events").delete().eq("match_id", match.id);
+    const eventsTable: AnyTable = supabase.from("match_events");
+    const { error: deleteError } = await eventsTable.delete().eq("match_id", match.id);
+    if (deleteError) { setError(`Resultado salvo, mas os eventos antigos não puderam ser substituídos: ${deleteError.message}`); setSaving(false); return; }
     const eventType = doubleWalkover ? "double_walkover" : walkover ? (mineWon ? "walkover_win" : "walkover_loss") : (mineWon ? "match_win" : "match_loss");
     const events = [{ season_id: match.season_id, round_id: round.id, match_id: match.id, athlete_id: athlete.id, event_type: eventType, points: minePoints, metadata: { source: "dashboard_quick_result", edited: match.status !== "scheduled" } }, ...(otherId ? [{ season_id: match.season_id, round_id: round.id, match_id: match.id, athlete_id: otherId, event_type: doubleWalkover ? "double_walkover" : mineWon ? "match_loss" : "walkover_win", points: opponentPoints, metadata: { source: "dashboard_quick_result", edited: match.status !== "scheduled" } }] : [])];
-    const { error: eventError } = await supabase.from("match_events").insert(events);
+    const { error: eventError } = await eventsTable.insert(events);
     if (eventError) { setError(`Resultado salvo, mas os eventos não foram atualizados: ${eventError.message}`); setSaving(false); return; }
     setMessage(`Resultado da Rodada ${round.round_number} salvo. Você pode alterá-lo se necessário.`); await loadMatch(); setSaving(false);
   }
 
   if (loading) return <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6"><p className="text-slate-400">Carregando seu confronto...</p></section>;
-  if (!match) return <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6"><h2 className="text-xl font-semibold text-white">Seu confronto</h2><p className="mt-2 text-slate-400">Nenhum confronto disponível na rodada atual.</p></section>;
+  if (!match || !round) return <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6"><h2 className="text-xl font-semibold text-white">Seu confronto</h2><p className="mt-2 text-slate-400">Nenhum confronto disponível na rodada atual.</p></section>;
   const doubleWalkover = resultType === "double_walkover"; const hasResult = match.status === "result_submitted" || match.status === "walkover";
   return <section className="rounded-2xl border border-emerald-500/30 bg-slate-900/70 p-6 shadow-xl"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs uppercase tracking-wide text-emerald-400">Rodada {round.round_number} · seu confronto</p><h2 className="mt-1 text-2xl font-bold text-white">Você × {opponentName}</h2><p className="mt-1 text-sm text-slate-400">{hasResult ? "Resultado registrado. Qualquer atleta da partida pode corrigi-lo." : "Registre o resultado rapidamente nesta tela."}</p></div><span className={`rounded-full border px-3 py-1 text-xs ${hasResult ? "border-emerald-500/30 text-emerald-300" : "border-amber-500/30 text-amber-200"}`}>{hasResult ? "Resultado enviado" : "Aguardando resultado"}</span></div><div className="mt-6 grid gap-4 sm:grid-cols-3"><label className="text-sm text-slate-300">Tipo<select value={resultType} onChange={(event) => setResultType(event.target.value)} className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white"><option value="normal">Resultado</option><option value="walkover">WO</option><option value="double_walkover">WO duplo</option></select></label><label className="text-sm text-slate-300">Vencedor<select value={winner} onChange={(event) => setWinner(event.target.value)} disabled={doubleWalkover} className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white"><option value="me">Você</option><option value="opponent">{opponentName}</option></select></label><div className="grid grid-cols-2 gap-2"><label className="text-sm text-slate-300">Seus games<input type="number" min="0" value={doubleWalkover ? 0 : myGames} disabled={doubleWalkover} onChange={(event) => setMyGames(event.target.value)} className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white" /></label><label className="text-sm text-slate-300">Adversário<input type="number" min="0" value={doubleWalkover ? 0 : opponentGames} disabled={doubleWalkover} onChange={(event) => setOpponentGames(event.target.value)} className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white" /></label></div></div>{doubleWalkover && <p className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">WO duplo: 0 pontos, 0 games e 0 sets para os dois atletas.</p>}{error && <p className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">{error}</p>}{message && <p className="mt-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-300">{message}</p>}<button type="button" onClick={() => void saveResult()} disabled={saving} className="mt-5 rounded-lg bg-emerald-500 px-5 py-3 font-semibold text-slate-950 hover:bg-emerald-400 disabled:opacity-50">{saving ? "Salvando..." : hasResult ? "Alterar resultado" : "Enviar resultado"}</button></section>;
 }
