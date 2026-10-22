@@ -16,7 +16,16 @@ export default function AdminPage() {
     const checkAccess = async () => {
       const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
-      const isAdmin = user?.email?.toLowerCase() === ADMIN_EMAIL || user?.app_metadata?.role === "admin";
+      if (!user) {
+        setChecking(false);
+        return;
+      }
+      const { data: roleRow } = await supabase
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      const isAdmin = user.email?.toLowerCase() === ADMIN_EMAIL || roleRow?.role === "admin" || user.app_metadata?.role === "admin";
       setAuthorized(Boolean(isAdmin));
       setChecking(false);
     };
