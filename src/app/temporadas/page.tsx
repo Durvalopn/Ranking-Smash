@@ -1,7 +1,104 @@
-import SectionEmptyState from "@/components/SectionEmptyState";
+"use client";
 
-export const metadata = { title: "Temporadas | Ranking Smash" };
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import Navigation from "@/components/Navigation";
+import { createClient } from "@/lib/supabase/client";
+
+const TOURNAMENTS = ["Australian Open", "Roland Garros", "Wimbledon", "US Open", "Finals"];
+
+type Season = { id: string; name: string; year: number; rounds_count: number; status: string };
+type Round = { id: string; season_id: string; round_number: number; name: string; status: string; opens_at: string | null; closes_at: string | null };
+
+function plusDays(date: Date, days: number) {
+  const result = new Date(date);
+  result.setDate(result.getDate() + days);
+  return result.toISOString();
+}
+
+function formatDate(value: string | null) {
+  return value ? new Date(value).toLocaleDateString("pt-BR") : "-";
+}
 
 export default function TemporadasPage() {
-  return <SectionEmptyState title="Temporadas" description="Veja as temporadas do Ranking Smash." emptyMessage="Nenhuma temporada cadastrada ainda." />;
+  const [seasons, setSeasons] = useState<Season[]>([]);
+  const [rounds, setRounds] = useState<Round[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const supabase = createClient();
+
+  async function load() {
+    setLoading(true);
+    const [{ data: seasonData, error: seasonError }, { data: roundData, error: roundError }] = await Promise.all([
+      supabase.from("seasons").select("id, name, year, rounds_count, status").order("year", { ascending: false }).order("name"),
+      supabase.from("rounds").select("id, season_id, round_number, name, status, opens_at, closes_at").order("round_number", { ascending: false }),
+    ]);
+    if (seasonError || roundError) setError("Não foi possível carregar as temporadas. Verifique as permissões do banco.");
+    setSeasons((seasonData ?? []) as Season[]);
+    setRounds((roundData ?? []) as Round[]);
+    setLoading(false);
+  }
+
+  useEffect(() => { void load(); }, []);
+
+  async function createSeason(name: string) {
+    setBusy(`season:${name}`); setError(""); setMessage("");
+    const year = new Date().getFullYear();
+    const existing = seasons.find((item) => item.name === name && item.year === year);
+    if (existing) { setMessage(`${name} ${year} já está cadastrada.`); setBusy(null); return; }
+    const { error: insertError } = await supabase.from("seasons").insert({ name, year, rounds_count: 0, status: "registration" });
+    if (insertError) setError(`Não foi possível criar ${name}: ${insertError.message}`);
+    else { setMessage(`${name} ${year} criada.`); await load(); }
+    setBusy(null);
+  }
+
+  async function generateRound(season: Season) {
+    setBusy(`round:${season.id}`); setError(""); setMessage("");
+    const seasonRounds = rounds.filter((round) => round.season_id === season.id);
+    const openRound = seasonRounds.find((round) => round.status !== "closed");
+    if (openRound) { setError(`A ${openRound.name} ainda está aberta e termina em ${formatDate(openRound.closes_at)}.`); setBusy(null); return; }
+    const number = seasonRounds.length + 1;
+    const opened = new Date();
+    const closes = plusDays(opened, 10);
+    const { error: roundError } = await supabase.from("rounds").insert({ season_id: season.id, round_number: number, name: `Rodada ${number}`, status: "open", opens_at: opened.toISOString(), closes_at: closes });
+    if (roundError) setError(`Não foi possível gerar a rodada: ${roundError.message}`);
+    else {
+      await supabase.from("seasons").update({ rounds_count: number, status: "active" }).eq("id", season.id);
+      setMessage(`Rodada ${number} gerada. O prazo termina em ${formatDate(closes.toISOString())}.`);
+      await load();
+    }
+    setBusy(null);
+  }
+
+  return (
+    <>
+      <Navigation />
+      <main className="page-container py-10">
+        <div className="mx-auto max-w-5xl">
+          <Link href="/dashboard" className="text-sm text-emerald-400 hover:text-emerald-300">← Voltar ao dashboard</Link>
+          <h1 className="mt-4 text-3xl font-bold text-white">Temporadas</h1>
+          <p className="mt-2 text-slate-400">Crie os torneios do calendário e gere cada rodada com prazo de 10 dias.</p>
+          {message && <div className="mt-5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-300">{message}</div>}
+          {error && <div className="mt-5 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">{error}</div>}
+
+          <section className="mt-8 rounded-2xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+            <h2 className="text-lg font-semibold text-white">Calendário pré-cadastrado</h2>
+            <p className="mt-1 text-sm text-slate-400">O botão cria a temporada do ano atual sem exigir atletas cadastrados.</p>
+            <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {TOURNAMENTS.map((name) => <button key={name} onClick={() => void createSeason(name)} disabled={busy !== null} className="rounded-lg border border-slate-700 px-4 py-3 text-left text-slate-200 hover:border-emerald-400 hover:text-emerald-300 disabled:opacity-50">{busy === `season:${name}` ? "Criando..." : `Criar ${name}`}</button>)}
+            </div>
+          </section>
+
+          <section className="mt-6 space-y-4">
+            {loading ? <div className="text-slate-400">Carregando...</div> : seasons.length === 0 ? <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-8 text-center text-slate-400">Nenhuma temporada criada ainda.</div> : seasons.map((season) => {
+              const seasonRounds = rounds.filter((round) => round.season_id === season.id);
+              return <article key={season.id} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl"><div className="flex flex-wrap items-center justify-between gap-4"><div><h2 className="text-xl font-semibold text-white">{season.name} {season.year}</h2><p className="mt-1 text-sm text-slate-400">{seasonRounds.length} rodada(s) · status: {season.status}</p></div><button onClick={() => void generateRound(season)} disabled={busy !== null} className="rounded-lg bg-emerald-500 px-4 py-2 font-semibold text-slate-950 hover:bg-emerald-400 disabled:opacity-50">{busy === `round:${season.id}` ? "Gerando..." : "Gerar próxima rodada"}</button></div>{seasonRounds.length > 0 && <div className="mt-5 space-y-2">{seasonRounds.map((round) => <div key={round.id} className="flex flex-wrap justify-between gap-2 rounded-lg border border-slate-800 px-4 py-3 text-sm"><span className="text-slate-200">{round.name} · {round.status}</span><span className="text-slate-400">até {formatDate(round.closes_at)}</span></div>)}</div>}</article>;
+            })}
+          </section>
+        </div>
+      </main>
+    </>
+  );
 }
