@@ -10,6 +10,14 @@ const TOURNAMENTS = ["Australian Open", "Roland Garros", "Wimbledon", "US Open",
 
 type Season = { id: string; name: string; year: number; rounds_count: number; status: string };
 type Round = { id: string; season_id: string; round_number: number; name: string; status: string; opens_at: string | null; closes_at: string | null };
+type SeasonInsert = { name: string; year: number; rounds_count: number; status: string };
+type RoundInsert = { season_id: string; round_number: number; name: string; status: string; opens_at: string; closes_at: string };
+
+type UntypedTable = {
+  select: (columns: string) => any;
+  insert: (values: SeasonInsert | RoundInsert) => any;
+  update: (values: Record<string, unknown>) => any;
+};
 
 function plusDays(date: Date, days: number) {
   const result = new Date(date);
@@ -36,14 +44,13 @@ export default function TemporadasPage() {
     const { data: { user } } = await supabase.auth.getUser();
     const isAdmin = user?.email?.toLowerCase() === ADMIN_EMAIL;
     setAuthorized(isAdmin);
-    if (!isAdmin) {
-      setLoading(false);
-      return;
-    }
+    if (!isAdmin) { setLoading(false); return; }
 
+    const seasonsTable = supabase.from("seasons") as unknown as UntypedTable;
+    const roundsTable = supabase.from("rounds") as unknown as UntypedTable;
     const [{ data: seasonData, error: seasonError }, { data: roundData, error: roundError }] = await Promise.all([
-      supabase.from("seasons").select("id, name, year, rounds_count, status").order("year", { ascending: false }).order("name"),
-      supabase.from("rounds").select("id, season_id, round_number, name, status, opens_at, closes_at").order("round_number", { ascending: false }),
+      seasonsTable.select("id, name, year, rounds_count, status").order("year", { ascending: false }).order("name"),
+      roundsTable.select("id, season_id, round_number, name, status, opens_at, closes_at").order("round_number", { ascending: false }),
     ]);
     if (seasonError || roundError) setError("Não foi possível carregar as temporadas. Verifique as permissões do banco.");
     setSeasons((seasonData ?? []) as Season[]);
@@ -59,7 +66,8 @@ export default function TemporadasPage() {
     const year = new Date().getFullYear();
     const existing = seasons.find((item) => item.name === name && item.year === year);
     if (existing) { setMessage(`${name} ${year} já está cadastrada.`); setBusy(null); return; }
-    const { error: insertError } = await supabase.from("seasons").insert({ name, year, rounds_count: 0, status: "registration" });
+    const seasonsTable = supabase.from("seasons") as unknown as UntypedTable;
+    const { error: insertError } = await seasonsTable.insert({ name, year, rounds_count: 0, status: "registration" });
     if (insertError) setError(`Não foi possível criar ${name}: ${insertError.message}`);
     else { setMessage(`${name} ${year} criada.`); await load(); }
     setBusy(null);
@@ -74,11 +82,13 @@ export default function TemporadasPage() {
     const number = seasonRounds.length + 1;
     const opened = new Date();
     const closes = plusDays(opened, 10);
-    const { error: roundError } = await supabase.from("rounds").insert({ season_id: season.id, round_number: number, name: `Rodada ${number}`, status: "open", opens_at: opened.toISOString(), closes_at: closes });
+    const roundsTable = supabase.from("rounds") as unknown as UntypedTable;
+    const { error: roundError } = await roundsTable.insert({ season_id: season.id, round_number: number, name: `Rodada ${number}`, status: "open", opens_at: opened.toISOString(), closes_at: closes });
     if (roundError) setError(`Não foi possível gerar a rodada: ${roundError.message}`);
     else {
-      await supabase.from("seasons").update({ rounds_count: number, status: "active" }).eq("id", season.id);
-      setMessage(`Rodada ${number} gerada. O prazo termina em ${formatDate(closes.toISOString())}.`);
+      const seasonsTable = supabase.from("seasons") as unknown as UntypedTable;
+      await seasonsTable.update({ rounds_count: number, status: "active" }).eq("id", season.id);
+      setMessage(`Rodada ${number} gerada. O prazo termina em ${formatDate(closes)}.`);
       await load();
     }
     setBusy(null);
