@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import Navigation from "@/components/Navigation";
 import { createClient } from "@/lib/supabase/client";
+import { buildRoundDraw, type DrawAthlete, type ExistingMatch } from "@/lib/round-draw";
 
 const ADMIN_EMAIL = "eng.durvalneto@gmail.com";
 const MAX_ROUNDS = 6;
@@ -12,7 +13,7 @@ const TOURNAMENTS = ["Australian Open", "Roland Garros", "Wimbledon", "US Open",
 type Season = { id: string; name: string; year: number; rounds_count: number; status: string };
 type Round = { id: string; season_id: string; round_number: number; name: string; status: string; opens_at: string | null; closes_at: string | null };
 type InsertValues = Record<string, unknown>;
-type UntypedTable = { select: (columns: string) => any; insert: (values: InsertValues) => any; update: (values: InsertValues) => any };
+type UntypedTable = { select: (columns: string) => any; insert: (values: InsertValues | InsertValues[]) => any; update: (values: InsertValues) => any };
 
 function plusDays(date: Date, days: number) { const result = new Date(date); result.setDate(result.getDate() + days); return result.toISOString(); }
 function formatDate(value: string | null) { return value ? new Date(value).toLocaleDateString("pt-BR") : "-"; }
@@ -34,7 +35,6 @@ export default function TemporadasPage() {
     const isAdmin = user?.email?.trim().toLowerCase() === ADMIN_EMAIL;
     setAuthorized(isAdmin);
     if (!isAdmin) { setLoading(false); return; }
-
     const seasonsTable = supabase.from("seasons") as unknown as UntypedTable;
     const roundsTable = supabase.from("rounds") as unknown as UntypedTable;
     const [{ data: seasonData, error: seasonError }, { data: roundData, error: roundError }] = await Promise.all([
@@ -42,16 +42,12 @@ export default function TemporadasPage() {
       roundsTable.select("id, season_id, round_number, name, status, opens_at, closes_at").order("round_number", { ascending: false }),
     ]);
     if (seasonError || roundError) setError("Não foi possível carregar as temporadas. Verifique as permissões do banco.");
-
     const loadedSeasons = (seasonData ?? []) as Season[];
     const loadedRounds = (roundData ?? []) as Round[];
     const finishedIds = loadedSeasons.filter((season) => isFinished(loadedRounds.filter((round) => round.season_id === season.id))).map((season) => season.id);
-    if (finishedIds.length > 0) {
-      await Promise.all(finishedIds.map((id) => seasonsTable.update({ status: "finished", rounds_count: MAX_ROUNDS }).eq("id", id)));
-    }
+    if (finishedIds.length > 0) await Promise.all(finishedIds.map((id) => seasonsTable.update({ status: "finished", rounds_count: MAX_ROUNDS }).eq("id", id)));
     setSeasons(loadedSeasons.map((season) => finishedIds.includes(season.id) ? { ...season, status: "finished", rounds_count: MAX_ROUNDS } : season));
-    setRounds(loadedRounds);
-    setLoading(false);
+    setRounds(loadedRounds); setLoading(false);
   }
 
   useEffect(() => { void load(); }, []);
@@ -66,6 +62,32 @@ export default function TemporadasPage() {
     setBusy(null);
   }
 
+  async function drawAndPersist(roundId: string, seasonId: string, seed: string) {
+    const athletesQuery = await supabase.from("athletes").select("id, current_class, status").in("status", ["active", "licensed"]);
+    const previousQuery = await supabase.from("matches").select("athlete_one_id, athlete_two_id").eq("season_id", seasonId);
+    if (athletesQuery.error) throw new Error(`Não foi possível carregar atletas: ${athletesQuery.error.message}`);
+    if (previousQuery.error) throw new Error(`Não foi possível carregar confrontos anteriores: ${previousQuery.error.message}`);
+    const athletes = (athletesQuery.data ?? []) as DrawAthlete[];
+    const existing = (previousQuery.data ?? []) as ExistingMatch[];
+    const pairs = buildRoundDraw(athletes, existing, seed);
+    const matchesTable = supabase.from("matches") as unknown as UntypedTable;
+    const eventsTable = supabase.from("match_events") as unknown as UntypedTable;
+    const matches = pairs.filter((pair) => !pair.isBye).map((pair) => ({
+      season_id: seasonId, round_id: roundId, class_number: pair.classNumber, athlete_one_id: pair.athleteOneId, athlete_two_id: pair.athleteTwoId, draw_order: pair.drawOrder, status: "scheduled", result_type: "normal", seed, draw_cost: 0, justification: pair.justification, audit: { seed, algorithm: "class-grouped-deterministic-v1" },
+    }));
+    if (matches.length > 0) {
+      const { error: matchesError } = await matchesTable.insert(matches);
+      if (matchesError) throw new Error(`Não foi possível salvar confrontos: ${matchesError.message}`);
+    }
+    const events = pairs.filter((pair) => pair.isBye).map((pair) => ({ season_id: seasonId, round_id: roundId, match_id: null, athlete_id: pair.athleteOneId, event_type: "bye", points: 7, metadata: { seed, justification: pair.justification } }));
+    const licensed = athletes.filter((athlete) => athlete.status === "licensed").map((athlete) => ({ season_id: seasonId, round_id: roundId, match_id: null, athlete_id: athlete.id, event_type: "licensed", points: 3, metadata: { seed, justification: "Atleta licenciado recebe 3 pontos e não participa do sorteio." } }));
+    if (events.length + licensed.length > 0) {
+      const { error: eventsError } = await eventsTable.insert([...events, ...licensed]);
+      if (eventsError) throw new Error(`Não foi possível salvar eventos: ${eventsError.message}`);
+    }
+    return { matches: matches.length, byes: events.length, licensed: licensed.length };
+  }
+
   async function generateRound(season: Season) {
     if (!authorized) return;
     const seasonRounds = rounds.filter((round) => round.season_id === season.id);
@@ -74,9 +96,17 @@ export default function TemporadasPage() {
     const openRound = seasonRounds.find((round) => round.status !== "closed");
     if (openRound) { setError(`A ${openRound.name} ainda está aberta. O administrador precisa fechá-la antes de gerar a próxima.`); setBusy(null); return; }
     const number = seasonRounds.length + 1; const opened = new Date(); const closes = plusDays(opened, 10);
-    const { error: roundError } = await (supabase.from("rounds") as unknown as UntypedTable).insert({ season_id: season.id, round_number: number, name: `Rodada ${number}`, status: "open", opens_at: opened.toISOString(), closes_at: closes });
-    if (roundError) setError(`Não foi possível gerar a rodada: ${roundError.message}`);
-    else { await (supabase.from("seasons") as unknown as UntypedTable).update({ rounds_count: number, status: "active" }).eq("id", season.id); setMessage(`Rodada ${number} gerada. O prazo termina em ${formatDate(closes)}.`); await load(); }
+    const roundInsert = await (supabase.from("rounds") as unknown as UntypedTable).insert({ season_id: season.id, round_number: number, name: `Rodada ${number}`, status: "open", opens_at: opened.toISOString(), closes_at: closes }).select("id").single();
+    if (roundInsert.error) { setError(`Não foi possível gerar a rodada: ${roundInsert.error.message}`); setBusy(null); return; }
+    try {
+      const result = await drawAndPersist(roundInsert.data.id, season.id, `${season.id}:${roundInsert.data.id}`);
+      await (supabase.from("seasons") as unknown as UntypedTable).update({ rounds_count: number, status: "active" }).eq("id", season.id);
+      setMessage(`Rodada ${number} gerada com ${result.matches} confrontos, ${result.byes} bye(s) e ${result.licensed} atleta(s) licenciado(s). Prazo: ${formatDate(closes)}.`);
+      await load();
+    } catch (drawError) {
+      await (supabase.from("rounds") as unknown as UntypedTable).update({ status: "cancelled" }).eq("id", roundInsert.data.id);
+      setError(drawError instanceof Error ? drawError.message : "Não foi possível salvar o sorteio.");
+    }
     setBusy(null);
   }
 
