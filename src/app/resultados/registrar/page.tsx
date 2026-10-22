@@ -3,10 +3,6 @@
 import Link from "next/link";
 import AdminPanel from "@/components/AdminPanel";
 
-export const metadata = {
-  title: "Registrar resultado | Ranking Smash",
-};
-
 export default function RegistrarResultadoPage() {
   return (
     <main className="page-container py-10">
