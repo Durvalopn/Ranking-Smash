@@ -15,6 +15,7 @@ type Props = {
   matches: unknown[];
   standings: unknown[];
 };
+type QueryTable = any;
 
 export default function AthleteDashboard({ athleteName, athleteClass, athleteStatus, seasonName = "Nenhuma temporada ativa", currentRound = 0, totalRounds = 0, matches, standings }: Props) {
   const supabase = createClient();
@@ -26,9 +27,11 @@ export default function AthleteDashboard({ athleteName, athleteClass, athleteSta
   async function changeStatus(nextStatus: "active" | "licensed") {
     if (nextStatus === status || savingStatus) return;
     setSavingStatus(true); setStatusMessage(""); setStatusError("");
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: authData } = await supabase.auth.getUser();
+    const user = authData.user;
     if (!user) { setStatusError("Não foi possível identificar o usuário."); setSavingStatus(false); return; }
-    const { error } = await supabase.from("athletes").update({ status: nextStatus }).eq("user_id", user.id);
+    const athletesTable: QueryTable = supabase.from("athletes");
+    const { error } = await athletesTable.update({ status: nextStatus }).eq("user_id", user.id);
     if (error) { setStatusError(`Não foi possível atualizar o status: ${error.message}`); setSavingStatus(false); return; }
     setStatus(nextStatus);
     setStatusMessage(nextStatus === "licensed" ? "Você está licenciado. Não participará do próximo sorteio e receberá 3 pontos na próxima rodada." : "Você está ativo e poderá participar do próximo sorteio.");
