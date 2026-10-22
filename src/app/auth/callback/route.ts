@@ -4,22 +4,18 @@ import { type NextRequest, NextResponse } from "next/server";
 import type { Database } from "@/types/database";
 
 const DEFAULT_REDIRECT_PATH = "/dashboard";
+const ALLOWED_REDIRECT_PATHS = new Set(["/dashboard", "/redefinir-senha"]);
 
-const ALLOWED_REDIRECT_PATHS = new Set([
-  "/dashboard",
-  "/redefinir-senha",
-]);
+type CookieToSet = {
+  name: string;
+  value: string;
+  options?: unknown;
+};
 
-/**
- * Evita redirecionamentos externos ou para caminhos não autorizados.
- */
 function getSafeRedirectPath(value: string | null): string {
-  if (!value) {
-    return DEFAULT_REDIRECT_PATH;
-  }
+  if (!value) return DEFAULT_REDIRECT_PATH;
 
   let decodedValue = value;
-
   try {
     decodedValue = decodeURIComponent(value);
   } catch {
@@ -34,19 +30,15 @@ function getSafeRedirectPath(value: string | null): string {
     return DEFAULT_REDIRECT_PATH;
   }
 
-  let redirectUrl: URL;
-
   try {
-    redirectUrl = new URL(decodedValue, "http://localhost");
+    const redirectUrl = new URL(decodedValue, "http://localhost");
+    if (!ALLOWED_REDIRECT_PATHS.has(redirectUrl.pathname)) {
+      return DEFAULT_REDIRECT_PATH;
+    }
+    return `${redirectUrl.pathname}${redirectUrl.search}${redirectUrl.hash}`;
   } catch {
     return DEFAULT_REDIRECT_PATH;
   }
-
-  if (!ALLOWED_REDIRECT_PATHS.has(redirectUrl.pathname)) {
-    return DEFAULT_REDIRECT_PATH;
-  }
-
-  return `${redirectUrl.pathname}${redirectUrl.search}${redirectUrl.hash}`;
 }
 
 function createErrorUrl(
@@ -55,59 +47,38 @@ function createErrorUrl(
   recoveryFlow: boolean,
 ): URL {
   const url = request.nextUrl.clone();
-
   url.pathname = recoveryFlow ? "/esqueci-minha-senha" : "/login";
   url.search = "";
   url.hash = "";
   url.searchParams.set("erro", errorCode);
-
   return url;
+}
+
+function copyCookies(source: NextResponse, target: NextResponse) {
+  source.cookies.getAll().forEach((cookie) => {
+    target.cookies.set(cookie.name, cookie.value, cookie);
+  });
 }
 
 export async function GET(request: NextRequest) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
   const code = request.nextUrl.searchParams.get("code");
-  const requestedPath = request.nextUrl.searchParams.get("next");
-  const safeRedirectPath = getSafeRedirectPath(requestedPath);
-
-  const isRecoveryFlow = safeRedirectPath.startsWith("/redefinir-senha");
-
-  const providerError = request.nextUrl.searchParams.get("error");
-  const providerErrorCode = request.nextUrl.searchParams.get("error_code");
-  const providerErrorDescription = request.nextUrl.searchParams.get(
-    "error_description",
+  const safeRedirectPath = getSafeRedirectPath(
+    request.nextUrl.searchParams.get("next"),
   );
+  const isRecoveryFlow = safeRedirectPath.startsWith("/redefinir-senha");
+  const providerError = request.nextUrl.searchParams.get("error");
 
   if (providerError) {
-    console.error("Erro retornado pelo Supabase Auth:", {
-      error: providerError,
-      code: providerErrorCode,
-      description: providerErrorDescription,
-    });
-
     return NextResponse.redirect(
-      createErrorUrl(
-        request,
-        providerErrorCode ?? "link_invalido",
-        isRecoveryFlow,
-      ),
+      createErrorUrl(request, "link_invalido", isRecoveryFlow),
     );
   }
 
   if (!supabaseUrl || !supabaseAnonKey) {
-    console.error(
-      "As variáveis NEXT_PUBLIC_SUPABASE_URL e " +
-        "NEXT_PUBLIC_SUPABASE_ANON_KEY não estão configuradas.",
-    );
-
     return NextResponse.redirect(
-      createErrorUrl(
-        request,
-        "configuracao_indisponivel",
-        isRecoveryFlow,
-      ),
+      createErrorUrl(request, "configuracao_indisponivel", isRecoveryFlow),
     );
   }
 
@@ -117,13 +88,8 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const destinationUrl = new URL(
-    safeRedirectPath,
-    request.nextUrl.origin,
-  );
-
+  const destinationUrl = new URL(safeRedirectPath, request.nextUrl.origin);
   const response = NextResponse.redirect(destinationUrl);
-
   response.headers.set("Cache-Control", "no-store");
 
   const supabase = createServerClient<Database>(
@@ -134,10 +100,13 @@ export async function GET(request: NextRequest) {
         getAll() {
           return request.cookies.getAll();
         },
-
-        setAll(cookiesToSet) {
+        setAll(cookiesToSet: CookieToSet[]) {
           cookiesToSet.forEach(({ name, value, options }) => {
-            response.cookies.set(name, value, options);
+            response.cookies.set(
+              name,
+              value,
+              options as Parameters<typeof response.cookies.set>[2],
+            );
           });
         },
       },
@@ -147,11 +116,6 @@ export async function GET(request: NextRequest) {
   const { error } = await supabase.auth.exchangeCodeForSession(code);
 
   if (error) {
-    console.error(
-      "Não foi possível trocar o código pela sessão:",
-      error.message,
-    );
-
     const errorResponse = NextResponse.redirect(
       createErrorUrl(
         request,
@@ -159,13 +123,8 @@ export async function GET(request: NextRequest) {
         isRecoveryFlow,
       ),
     );
-
     errorResponse.headers.set("Cache-Control", "no-store");
-
-    response.cookies.getAll().forEach((cookie) => {
-      errorResponse.cookies.set(cookie.name, cookie.value, cookie);
-    });
-
+    copyCookies(response, errorResponse);
     return errorResponse;
   }
 
