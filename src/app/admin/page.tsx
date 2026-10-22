@@ -7,31 +7,43 @@ import Navigation from "@/components/Navigation";
 import { createClient } from "@/lib/supabase/client";
 
 const ADMIN_EMAIL = "eng.durvalneto@gmail.com";
-type RoleRow = { role: string | null };
-type RoleQueryResult = { data: RoleRow | null; error: { message: string } | null };
+type RoleRow = { role?: string | null };
+type RoleQueryResult = { data: RoleRow | null; error: unknown };
+
+function isAdministrator(email: string | undefined, role: unknown, metadataRole: unknown) {
+  const normalizedEmail = (email ?? "").trim().toLowerCase();
+  const normalizedRole = String(role ?? metadataRole ?? "").trim().toLowerCase();
+  return normalizedEmail === ADMIN_EMAIL || normalizedRole === "admin";
+}
 
 export default function AdminPage() {
   const [checking, setChecking] = useState(true);
   const [authorized, setAuthorized] = useState(false);
 
   useEffect(() => {
+    let active = true;
     const checkAccess = async () => {
       const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        setChecking(false);
+        if (active) setChecking(false);
         return;
       }
+
       const { data: roleRow } = (await supabase
         .from("user_roles")
         .select("role")
         .eq("user_id", user.id)
         .maybeSingle()) as unknown as RoleQueryResult;
-      const isAdmin = user.email?.toLowerCase() === ADMIN_EMAIL || roleRow?.role === "admin" || user.app_metadata?.role === "admin";
-      setAuthorized(Boolean(isAdmin));
-      setChecking(false);
+
+      const allowed = isAdministrator(user.email, roleRow?.role, user.app_metadata?.role);
+      if (active) {
+        setAuthorized(allowed);
+        setChecking(false);
+      }
     };
     void checkAccess();
+    return () => { active = false; };
   }, []);
 
   return (
