@@ -15,11 +15,8 @@ type FormData = {
 };
 
 type AthleteRecord = { current_class: number | null };
-
-type AthleteQueryResult = {
-  data: AthleteRecord | null;
-  error: { message: string } | null;
-};
+type AthleteQueryResult = { data: AthleteRecord | null; error: { message: string } | null };
+type AthleteUpdateTable = { update: (values: { current_class: number }) => any };
 
 function normalizeClass(value: unknown) {
   const match = String(value ?? "").match(/[1-6]/);
@@ -96,8 +93,8 @@ export default function EditarPerfilPage() {
       return;
     }
 
-    const { error: athleteError } = await supabase
-      .from("athletes")
+    const athleteTable = supabase.from("athletes") as unknown as AthleteUpdateTable;
+    const { error: athleteError } = await athleteTable
       .update({ current_class: Number(form.classNumber) })
       .eq("user_id", user.id);
 
