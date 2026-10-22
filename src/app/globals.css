@@ -1,0 +1,316 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* =========================================================
+   App Ranking Smash — Estilos globais
+   ========================================================= */
+
+@layer base {
+  :root {
+    color-scheme: dark;
+
+    --background: 2 6 23;
+    --foreground: 241 245 249;
+    --surface: 15 23 42;
+    --surface-muted: 30 41 59;
+    --border: 51 65 85;
+    --primary: 34 197 94;
+    --primary-hover: 74 222 128;
+    --danger: 239 68 68;
+    --warning: 245 158 11;
+  }
+
+  * {
+    box-sizing: border-box;
+    border-color: rgb(var(--border));
+  }
+
+  html {
+    min-height: 100%;
+    scroll-behavior: smooth;
+    background-color: rgb(var(--background));
+  }
+
+  body {
+    min-height: 100vh;
+    margin: 0;
+    background-color: rgb(var(--background));
+    color: rgb(var(--foreground));
+    font-family:
+      var(--font-inter),
+      Inter,
+      ui-sans-serif,
+      system-ui,
+      -apple-system,
+      BlinkMacSystemFont,
+      "Segoe UI",
+      sans-serif;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    color: rgb(var(--foreground));
+    font-weight: 700;
+    line-height: 1.2;
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]) {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  input:disabled,
+  select:disabled,
+  textarea:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+
+  input,
+  select,
+  textarea {
+    color-scheme: dark;
+  }
+
+  textarea {
+    resize: vertical;
+  }
+
+  img,
+  picture,
+  video,
+  canvas,
+  svg {
+    display: block;
+    max-width: 100%;
+  }
+
+  ::selection {
+    background-color: rgb(34 197 94 / 35%);
+    color: rgb(240 253 244);
+  }
+
+  :focus-visible {
+    outline: 2px solid rgb(74 222 128);
+    outline-offset: 3px;
+  }
+}
+
+/* =========================================================
+   Componentes reutilizáveis
+   ========================================================= */
+
+@layer components {
+  .page-container {
+    @apply mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8;
+  }
+
+  .card {
+    @apply rounded-2xl border border-slate-800 bg-slate-900/80 p-5 shadow-lg backdrop-blur-sm;
+  }
+
+  .card-interactive {
+    @apply card transition duration-200 hover:-translate-y-0.5 hover:border-smash-700 hover:shadow-smash;
+  }
+
+  .btn {
+    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition duration-200;
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-smash-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950;
+    @apply disabled:pointer-events-none disabled:opacity-60;
+  }
+
+  .btn-primary {
+    @apply btn bg-smash-600 text-white shadow-smash hover:bg-smash-500 active:bg-smash-700;
+  }
+
+  .btn-secondary {
+    @apply btn border border-slate-700 bg-slate-900 text-slate-100 hover:border-smash-600 hover:bg-slate-800;
+  }
+
+  .btn-danger {
+    @apply btn bg-red-600 text-white hover:bg-red-500 active:bg-red-700;
+  }
+
+  .input-label {
+    @apply mb-2 block text-sm font-medium text-slate-200;
+  }
+
+  .input-field {
+    @apply min-h-11 w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100;
+    @apply placeholder:text-slate-500;
+    @apply transition duration-200;
+    @apply hover:border-slate-600;
+    @apply focus:border-smash-500 focus:outline-none focus:ring-2 focus:ring-smash-500/30;
+    @apply disabled:bg-slate-800 disabled:text-slate-500;
+  }
+
+  .input-error {
+    @apply border-red-500 focus:border-red-500 focus:ring-red-500/30;
+  }
+
+  .form-error {
+    @apply mt-1.5 text-sm text-red-400;
+  }
+
+  .form-help {
+    @apply mt-1.5 text-sm text-slate-400;
+  }
+
+  .badge {
+    @apply inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold;
+  }
+
+  .badge-success {
+    @apply badge border-smash-700/70 bg-smash-950/70 text-smash-300;
+  }
+
+  .badge-warning {
+    @apply badge border-amber-700/70 bg-amber-950/70 text-amber-300;
+  }
+
+  .badge-danger {
+    @apply badge border-red-700/70 bg-red-950/70 text-red-300;
+  }
+
+  .badge-neutral {
+    @apply badge border-slate-700 bg-slate-800 text-slate-300;
+  }
+
+  .table-container {
+    @apply w-full overflow-x-auto rounded-2xl border border-slate-800;
+  }
+
+  .ranking-table {
+    @apply w-full min-w-[720px] border-collapse text-left text-sm;
+  }
+
+  .ranking-table thead {
+    @apply bg-slate-900 text-xs uppercase tracking-wider text-slate-400;
+  }
+
+  .ranking-table th {
+    @apply px-4 py-3 font-semibold;
+  }
+
+  .ranking-table td {
+    @apply border-t border-slate-800 px-4 py-3 text-slate-300;
+  }
+
+  .ranking-table tbody tr {
+    @apply bg-slate-950/50 transition-colors hover:bg-slate-900/80;
+  }
+}
+
+/* =========================================================
+   Utilitários personalizados
+   ========================================================= */
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .text-pretty {
+    text-wrap: pretty;
+  }
+
+  .glass {
+    @apply border border-white/10 bg-slate-900/70 backdrop-blur-xl;
+  }
+
+  .tennis-court-pattern {
+    background-color: #14532d;
+    background-image:
+      linear-gradient(rgb(255 255 255 / 8%) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(255 255 255 / 8%) 1px, transparent 1px);
+    background-size: 48px 48px;
+  }
+}
+
+/* =========================================================
+   Preenchimento automático dos navegadores
+   ========================================================= */
+
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill,
+select:-webkit-autofill {
+  -webkit-text-fill-color: #f1f5f9;
+  caret-color: #f1f5f9;
+  box-shadow: 0 0 0 1000px #0f172a inset;
+  transition: background-color 9999s ease-in-out 0s;
+}
+
+/* =========================================================
+   Barra de rolagem
+   ========================================================= */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #475569 #0f172a;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0f172a;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 2px solid #0f172a;
+  border-radius: 9999px;
+  background: #475569;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #16a34a;
+}
+
+/* =========================================================
+   Acessibilidade — redução de movimento
+   ========================================================= */
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
