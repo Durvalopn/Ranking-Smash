@@ -8,7 +8,7 @@ import ClassMovementPanel from "@/components/ClassMovementPanel";
 import { createClient } from "@/lib/supabase/client";
 
 const ADMIN_EMAIL = "eng.durvalneto@gmail.com";
-type DbSeason = { id: string; name: string; year: number; status: AdminSeason["status"]; };
+type DbSeason = { id: string; name: string; year: number; status: AdminSeason["status"]; rounds_count: number | null; };
 type DbRound = { id: string; season_id: string; round_number: number; status: AdminRound["status"]; opens_at?: string | null; closes_at?: string | null };
 type DbMatch = { id: string; season_id: string; round_id: string; class_number: number; status: AdminMatch["status"]; athlete_one_id: string; athlete_two_id: string | null };
 type DbAthlete = { id: string; user_id: string; status: string };
@@ -19,10 +19,10 @@ export default function AdminPage() {
 
   async function loadAdminData() {
     const supabase = createClient() as any;
-    const [seasonQuery, roundQuery, matchQuery, athleteQuery, profileQuery] = await Promise.all([supabase.from("seasons").select("id,name,year,status").eq("season_type", "regular").order("created_at", { ascending: false }), supabase.from("rounds").select("id,season_id,round_number,status,opens_at,closes_at").order("round_number", { ascending: false }), supabase.from("matches").select("id,season_id,round_id,class_number,status,athlete_one_id,athlete_two_id").order("draw_order", { ascending: true }), supabase.from("athletes").select("id,user_id,status"), supabase.from("profiles").select("id,full_name")]);
+    const [seasonQuery, roundQuery, matchQuery, athleteQuery, profileQuery] = await Promise.all([supabase.from("seasons").select("id,name,year,status,rounds_count").eq("season_type", "regular").order("created_at", { ascending: false }), supabase.from("rounds").select("id,season_id,round_number,status,opens_at,closes_at").order("round_number", { ascending: false }), supabase.from("matches").select("id,season_id,round_id,class_number,status,athlete_one_id,athlete_two_id").order("draw_order", { ascending: true }), supabase.from("athletes").select("id,user_id,status"), supabase.from("profiles").select("id,full_name")]);
     if (seasonQuery.error || roundQuery.error || matchQuery.error || athleteQuery.error || profileQuery.error) { setSeasonError("Não foi possível carregar os dados administrativos. Atualize a página."); return; }
     const athleteRows = (athleteQuery.data ?? []) as DbAthlete[]; const profileMap = Object.fromEntries(((profileQuery.data ?? []) as DbProfile[]).map((profile) => [profile.id, profile.full_name || "Atleta"])); const nameMap = Object.fromEntries(athleteRows.map((athlete) => [athlete.id, profileMap[athlete.user_id] || "Atleta"])); const dbSeasons = (seasonQuery.data ?? []) as DbSeason[]; const dbRounds = (roundQuery.data ?? []) as DbRound[]; const dbMatches = (matchQuery.data ?? []) as DbMatch[];
-    setSeasons(dbSeasons.map((season) => ({ id: season.id, name: season.name, year: season.year, status: season.status })));
+    setSeasons(dbSeasons.map((season) => ({ id: season.id, name: season.name, year: season.year, status: season.status, roundsCount: season.rounds_count ?? undefined })));
     setRounds(dbRounds.map((round) => ({ id: round.id, seasonId: round.season_id, number: round.round_number, status: round.status, startsAt: round.opens_at ?? null, endsAt: round.closes_at ?? null, matchesCount: dbMatches.filter((match) => match.round_id === round.id).length })));
     setMatches(dbMatches.map((match) => ({ id: match.id, seasonId: match.season_id, roundId: match.round_id, classNumber: match.class_number, athleteOneName: nameMap[match.athlete_one_id] || "Atleta", athleteTwoName: match.athlete_two_id ? nameMap[match.athlete_two_id] || "Atleta" : null, status: match.status })));
     setStats({ activeAthletes: athleteRows.filter((athlete) => athlete.status === "active").length, licensedAthletes: athleteRows.filter((athlete) => athlete.status === "licensed").length, openMatches: dbMatches.filter((match) => ["scheduled", "pending", "awaiting_result"].includes(match.status)).length, contestedMatches: dbMatches.filter((match) => match.status === "contested").length });
