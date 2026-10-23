@@ -64,7 +64,7 @@ export function calculateSeasonClassMovements(standings: AthleteFinalStanding[],
     const promoted = new Set(eligible.slice(0, promotions).map((athlete) => athlete.athleteId)); const relegated = new Set(eligible.slice(-relegations).map((athlete) => athlete.athleteId));
     eligible.forEach((athlete, index) => { const promotedHere = promoted.has(athlete.athleteId); const relegatedHere = relegated.has(athlete.athleteId); const movement = promotedHere ? "promoted" : relegatedHere ? "relegated" : "stayed"; const nextClass = promotedHere ? classNumber - 1 : relegatedHere ? classNumber + 1 : classNumber; movements.push({ athleteId: athlete.athleteId, athleteName: athlete.athleteName, previousClass: classNumber, nextClass, finalPosition: index + 1, movement, reason: promotedHere ? "promotion_zone" : relegatedHere ? "relegation_zone" : "remained_in_class", description: `${athlete.athleteName} permaneceu na Classe ${nextClass}.` }); });
     ineligible.forEach((athlete) => movements.push({ athleteId: athlete.athleteId, athleteName: athlete.athleteName, previousClass: classNumber, nextClass: classNumber, finalPosition: null, movement: "ineligible", reason: "not_eligible", description: `${athlete.athleteName} permaneceu na Classe ${classNumber} por não ser elegível.` }));
-    summary.push({ classNumber, eligibleAthletes: eligible.length, movementSlots: slots, promotedAthletes: promoted.length, relegatedAthletes: relegated.length });
+    summary.push({ classNumber, eligibleAthletes: eligible.length, movementSlots: slots, promotedAthletes: promoted.size, relegatedAthletes: relegated.size });
   }
   return { movements, summary };
 }
