@@ -18,6 +18,9 @@ type Props = {
 
 type QueryTable = any;
 
+type SeasonRow = { id: string };
+type RoundDeadlineRow = { closes_at: string | null };
+
 export default function AthleteDashboard({ athleteName, athleteClass, athleteStatus, seasonName = "Nenhuma temporada ativa", currentRound = 0, totalRounds = 0, matches, standings }: Props) {
   const supabase = createClient();
   const [status, setStatus] = useState(athleteStatus);
@@ -31,10 +34,12 @@ export default function AthleteDashboard({ athleteName, athleteClass, athleteSta
     (async () => {
       if (!currentRound) return;
       const { data: season } = await supabase.from("seasons").select("id").in("status", ["active", "registration"]).eq("season_type", "regular").order("year", { ascending: false }).limit(1).maybeSingle();
-      if (!season) return;
-      const { data: round } = await supabase.from("rounds").select("closes_at").eq("season_id", season.id).eq("round_number", currentRound).maybeSingle();
-      if (mounted && round?.closes_at) {
-        setRoundDeadline(new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date(round.closes_at)));
+      const seasonRow = season as SeasonRow | null;
+      if (!seasonRow?.id) return;
+      const { data: round } = await supabase.from("rounds").select("closes_at").eq("season_id", seasonRow.id).eq("round_number", currentRound).maybeSingle();
+      const roundRow = round as RoundDeadlineRow | null;
+      if (mounted && roundRow?.closes_at) {
+        setRoundDeadline(new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date(roundRow.closes_at)));
       }
     })();
     return () => { mounted = false; };
