@@ -3,15 +3,25 @@
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import Navigation from "@/components/Navigation";
-import AdminPanel from "@/components/AdminPanel";
+import AdminPanel, { AdminMatch, AdminPanelStats, AdminRound, AdminSeason } from "@/components/AdminPanel";
 import ClassMovementPanel from "@/components/ClassMovementPanel";
 import { createClient } from "@/lib/supabase/client";
 
 const ADMIN_EMAIL = "eng.durvalneto@gmail.com";
 
+type DbSeason = { id: string; name: string; year: number; status: AdminSeason["status"]; current_round?: number | null };
+type DbRound = { id: string; season_id: string; round_number: number; status: AdminRound["status"]; starts_at?: string | null; ends_at?: string | null };
+type DbMatch = { id: string; season_id: string; round_id: string; class_number: number; status: AdminMatch["status"]; athlete_one_id: string; athlete_two_id: string | null };
+type DbAthlete = { id: string; user_id: string; status: string };
+type DbProfile = { id: string; full_name: string | null };
+
 export default function AdminPage() {
   const [checking, setChecking] = useState(true);
   const [authorized, setAuthorized] = useState(false);
+  const [seasons, setSeasons] = useState<AdminSeason[]>([]);
+  const [rounds, setRounds] = useState<AdminRound[]>([]);
+  const [matches, setMatches] = useState<AdminMatch[]>([]);
+  const [stats, setStats] = useState<AdminPanelStats>({ activeAthletes: 0, licensedAthletes: 0, openMatches: 0, contestedMatches: 0 });
   const [seasonName, setSeasonName] = useState("");
   const [seasonYear, setSeasonYear] = useState(String(new Date().getFullYear()));
   const [roundsCount, setRoundsCount] = useState("10");
@@ -19,41 +29,54 @@ export default function AdminPage() {
   const [seasonMessage, setSeasonMessage] = useState("");
   const [seasonError, setSeasonError] = useState("");
 
+  async function loadAdminData() {
+    const supabase = createClient() as any;
+    const [seasonQuery, roundQuery, matchQuery, athleteQuery, profileQuery] = await Promise.all([
+      supabase.from("seasons").select("id,name,year,status,current_round").eq("season_type", "regular").order("created_at", { ascending: false }),
+      supabase.from("rounds").select("id,season_id,round_number,status,opens_at,closes_at").order("round_number", { ascending: false }),
+      supabase.from("matches").select("id,season_id,round_id,class_number,status,athlete_one_id,athlete_two_id").order("draw_order", { ascending: true }),
+      supabase.from("athletes").select("id,user_id,status"),
+      supabase.from("profiles").select("id,full_name"),
+    ]);
+    if (seasonQuery.error || roundQuery.error || matchQuery.error || athleteQuery.error || profileQuery.error) return;
+    const athleteRows = (athleteQuery.data ?? []) as DbAthlete[];
+    const profileMap = Object.fromEntries(((profileQuery.data ?? []) as DbProfile[]).map((profile) => [profile.id, profile.full_name || "Atleta"]));
+    const nameMap = Object.fromEntries(athleteRows.map((athlete) => [athlete.id, profileMap[athlete.user_id] || "Atleta"]));
+    const dbSeasons = (seasonQuery.data ?? []) as DbSeason[];
+    const dbRounds = (roundQuery.data ?? []) as DbRound[];
+    const dbMatches = (matchQuery.data ?? []) as DbMatch[];
+    setSeasons(dbSeasons.map((season) => ({ id: season.id, name: season.name, year: season.year, status: season.status, currentRound: season.current_round ?? null })));
+    setRounds(dbRounds.map((round) => ({ id: round.id, seasonId: round.season_id, number: round.round_number, status: round.status, startsAt: round.starts_at ?? null, endsAt: round.ends_at ?? null, matchesCount: dbMatches.filter((match) => match.round_id === round.id).length })));
+    setMatches(dbMatches.map((match) => ({ id: match.id, seasonId: match.season_id, roundId: match.round_id, classNumber: match.class_number, athleteOneName: nameMap[match.athlete_one_id] || "Atleta", athleteTwoName: match.athlete_two_id ? nameMap[match.athlete_two_id] || "Atleta" : null, status: match.status })));
+    setStats({ activeAthletes: athleteRows.filter((athlete) => athlete.status === "active").length, licensedAthletes: athleteRows.filter((athlete) => athlete.status === "licensed").length, openMatches: dbMatches.filter((match) => ["scheduled", "pending", "awaiting_result"].includes(match.status)).length, contestedMatches: dbMatches.filter((match) => ["contested"].includes(match.status)).length });
+  }
+
   useEffect(() => {
     let active = true;
     (async () => {
       const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
-      if (active) {
-        setAuthorized(Boolean(user?.email && user.email.toLowerCase() === ADMIN_EMAIL));
-        setChecking(false);
-      }
+      if (!active) return;
+      const isAdmin = Boolean(user?.email && user.email.toLowerCase() === ADMIN_EMAIL);
+      setAuthorized(isAdmin);
+      setChecking(false);
+      if (isAdmin) await loadAdminData();
     })();
     return () => { active = false; };
   }, []);
 
   async function createSeason(event: FormEvent) {
-    event.preventDefault();
-    setSeasonMessage("");
-    setSeasonError("");
-    const name = seasonName.trim();
-    const year = Number(seasonYear);
-    const totalRounds = Number(roundsCount);
+    event.preventDefault(); setSeasonMessage(""); setSeasonError("");
+    const name = seasonName.trim(); const year = Number(seasonYear); const totalRounds = Number(roundsCount);
     if (!name) { setSeasonError("Informe o nome da temporada."); return; }
     if (!Number.isInteger(year) || year < 2020 || year > 2100) { setSeasonError("Informe um ano válido."); return; }
     if (!Number.isInteger(totalRounds) || totalRounds < 1 || totalRounds > 100) { setSeasonError("A quantidade de rodadas deve estar entre 1 e 100."); return; }
     setSavingSeason(true);
     const supabase = createClient() as any;
     const { data, error } = await supabase.from("seasons").insert({ name, year, rounds_count: totalRounds, status: "registration", season_type: "regular" }).select("id,name,year,rounds_count,status").single();
-    if (error) {
-      setSeasonError(error.message.includes("CLASS_MOVEMENT_REQUIRED") ? "A movimentação de classes da temporada anterior precisa ser aplicada antes de criar uma nova temporada." : "Não foi possível criar a temporada. Verifique os dados e tente novamente.");
-      setSavingSeason(false);
-      return;
-    }
-    setSeasonName("");
-    setSeasonMessage(`Temporada ${data.name} ${data.year} criada com ${data.rounds_count} rodada(s).`);
-    setSavingSeason(false);
+    if (error) { setSeasonError(error.message.includes("CLASS_MOVEMENT_REQUIRED") ? "A movimentação de classes da temporada anterior precisa ser aplicada antes de criar uma nova temporada." : "Não foi possível criar a temporada. Verifique os dados e tente novamente."); setSavingSeason(false); return; }
+    setSeasonName(""); setSeasonMessage(`Temporada ${data.name} ${data.year} criada com ${data.rounds_count} rodada(s).`); setSavingSeason(false); await loadAdminData();
   }
 
-  return <><Navigation /><main className="page-container py-10"><div className="mx-auto max-w-6xl"><Link href="/dashboard" className="text-sm text-emerald-400">← Voltar ao dashboard</Link>{checking ? <p className="mt-8 text-slate-400">Verificando acesso...</p> : !authorized ? <section className="mt-8 rounded-2xl border border-red-500/30 bg-red-500/10 p-8 text-center"><h1 className="text-xl font-semibold text-red-200">Acesso negado</h1><p className="mt-2 text-sm text-red-300">Somente o administrador pode acessar esta área.</p></section> : <><h1 className="mt-4 text-3xl font-bold text-white">Administração</h1><p className="mt-2 text-slate-400">Crie temporadas, gerencie rodadas, resultados, movimentações de classes e o Finals.</p><section className="mt-8 rounded-2xl border border-emerald-500/30 bg-slate-900/70 p-6"><p className="text-xs font-semibold uppercase tracking-wide text-emerald-300">Nova temporada regular</p><h2 className="mt-2 text-2xl font-bold text-white">Criar temporada</h2><p className="mt-2 text-sm text-slate-400">A temporada será criada em registro e o Finals continua sendo gerado exclusivamente nesta área.</p><form onSubmit={createSeason} className="mt-5 grid gap-4 md:grid-cols-[minmax(0,1fr)_150px_180px_auto] md:items-end"><label className="text-sm text-slate-300">Nome<input value={seasonName} onChange={(event) => setSeasonName(event.target.value)} placeholder="Ex.: Australian Open" className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white" /></label><label className="text-sm text-slate-300">Ano<input type="number" min="2020" max="2100" value={seasonYear} onChange={(event) => setSeasonYear(event.target.value)} className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white" /></label><label className="text-sm text-slate-300">Rodadas<input type="number" min="1" max="100" value={roundsCount} onChange={(event) => setRoundsCount(event.target.value)} className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white" /></label><button type="submit" disabled={savingSeason} className="rounded-lg bg-emerald-500 px-5 py-2.5 font-semibold text-slate-950 disabled:opacity-50">{savingSeason ? "Criando..." : "Criar temporada"}</button></form>{seasonError && <p className="mt-4 rounded-lg bg-red-500/10 p-3 text-sm text-red-300">{seasonError}</p>}{seasonMessage && <p className="mt-4 rounded-lg bg-emerald-500/10 p-3 text-sm text-emerald-300">{seasonMessage}</p>}</section><AdminPanel /><ClassMovementPanel /><section className="mt-8 rounded-2xl border border-yellow-400/30 bg-yellow-400/10 p-6"><p className="text-xs font-semibold uppercase tracking-wide text-yellow-200">Finals automático</p><h2 className="mt-2 text-2xl font-bold text-yellow-100">As próximas fases são geradas pelos resultados dos usuários</h2><p className="mt-2 text-sm text-yellow-100/80">Quando todos os jogos de uma classe na etapa atual tiverem resultado lançado, a próxima etapa dessa classe será criada automaticamente. Nenhum avanço manual é necessário.</p></section></>}</div></main></>;
+  return <><Navigation /><main className="page-container py-10"><div className="mx-auto max-w-6xl"><Link href="/dashboard" className="text-sm text-emerald-400">← Voltar ao dashboard</Link>{checking ? <p className="mt-8 text-slate-400">Verificando acesso...</p> : !authorized ? <section className="mt-8 rounded-2xl border border-red-500/30 bg-red-500/10 p-8 text-center"><h1 className="text-xl font-semibold text-red-200">Acesso negado</h1><p className="mt-2 text-sm text-red-300">Somente o administrador pode acessar esta área.</p></section> : <><h1 className="mt-4 text-3xl font-bold text-white">Administração</h1><p className="mt-2 text-slate-400">Crie temporadas, gere rodadas, lance resultados e aplique movimentações.</p><section className="mt-8 rounded-2xl border border-emerald-500/30 bg-slate-900/70 p-6"><p className="text-xs font-semibold uppercase tracking-wide text-emerald-300">Nova temporada regular</p><h2 className="mt-2 text-2xl font-bold text-white">Criar temporada</h2><form onSubmit={createSeason} className="mt-5 grid gap-4 md:grid-cols-[minmax(0,1fr)_150px_180px_auto] md:items-end"><label className="text-sm text-slate-300">Nome<input value={seasonName} onChange={(event) => setSeasonName(event.target.value)} placeholder="Ex.: Australian Open" className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white" /></label><label className="text-sm text-slate-300">Ano<input type="number" min="2020" max="2100" value={seasonYear} onChange={(event) => setSeasonYear(event.target.value)} className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white" /></label><label className="text-sm text-slate-300">Rodadas<input type="number" min="1" max="100" value={roundsCount} onChange={(event) => setRoundsCount(event.target.value)} className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white" /></label><button type="submit" disabled={savingSeason} className="rounded-lg bg-emerald-500 px-5 py-2.5 font-semibold text-slate-950 disabled:opacity-50">{savingSeason ? "Criando..." : "Criar temporada"}</button></form>{seasonError && <p className="mt-4 rounded-lg bg-red-500/10 p-3 text-sm text-red-300">{seasonError}</p>}{seasonMessage && <p className="mt-4 rounded-lg bg-emerald-500/10 p-3 text-sm text-emerald-300">{seasonMessage}</p>}</section><div className="mt-8"><AdminPanel seasons={seasons} rounds={rounds} matches={matches} stats={stats} /></div><ClassMovementPanel /><section className="mt-8 rounded-2xl border border-yellow-400/30 bg-yellow-400/10 p-6"><p className="text-xs font-semibold uppercase tracking-wide text-yellow-200">Finals automático</p><h2 className="mt-2 text-2xl font-bold text-yellow-100">As próximas fases são gerenciadas pelos resultados</h2><p className="mt-2 text-sm text-yellow-100/80">Depois que todos os jogos da etapa atual tiverem resultado, o sistema poderá avançar para a próxima fase conforme as regras do Finals.</p></section></>}</div></main></>;
 }
