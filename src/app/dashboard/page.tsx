@@ -8,6 +8,8 @@ export const metadata = {
   description: "Acompanhe seus confrontos, resultados e classificação.",
 };
 
+type Profile = { full_name: string | null };
+type AthleteRecord = { id: string; user_id: string; current_class: number | null; status: string };
 type Season = { id: string; name: string; year: number; status: string; rounds_count: number };
 type Round = { id: string; season_id: string; round_number: number; status: string };
 type Match = {
@@ -28,7 +30,6 @@ type Match = {
   winner_athlete_id: string | null;
   draw_order: number | null;
 };
-
 type Standing = { athlete_id: string; position: number | null; points: number; sets_balance: number; games_balance: number };
 
 export default async function DashboardPage() {
@@ -39,7 +40,7 @@ export default async function DashboardPage() {
   const [{ data: profile }, { data: athlete }] = await Promise.all([
     supabase.from("profiles").select("full_name").eq("id", user.id).maybeSingle(),
     supabase.from("athletes").select("id,user_id,current_class,status").eq("user_id", user.id).maybeSingle(),
-  ]);
+  ]) as [{ data: Profile | null }, { data: AthleteRecord | null }];
 
   const athleteName = profile?.full_name || user.email?.split("@")[0] || "Atleta Smash";
   const athleteClass = athlete?.current_class ?? 6;
