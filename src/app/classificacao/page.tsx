@@ -5,158 +5,32 @@ import Link from "next/link";
 import Navigation from "@/components/Navigation";
 import { createClient } from "@/lib/supabase/client";
 
-type Season = { id: string; name: string; year: number; status: string; season_type: string | null };
-type Round = { id: string; season_id: string; round_number: number; status: string; name: string };
-type Athlete = { id: string; user_id: string };
-type Profile = { id: string; full_name: string | null };
-type SeasonClass = { season_id: string; athlete_id: string; class_number: number };
-type Entry = { season_id: string; class_number: number; athlete_id: string; qualification_reason: string; annual_points: number; seed: number; group_name: string };
-type Match = { id: string; season_id: string; round_id: string; class_number: number; draw_order: number | null; athlete_one_id: string; athlete_two_id: string | null; status: string; result_type: string | null; athlete_one_sets: number | null; athlete_two_sets: number | null; athlete_one_games: number | null; athlete_two_games: number | null; athlete_one_points: number | null; athlete_two_points: number | null; winner_athlete_id: string | null };
-type Row = { key: string; athleteId: string; classNumber: number; name: string; points: number; wins: number; losses: number; matches: number };
+type Season={id:string;name:string;year:number;status:string;season_type:string|null};
+type Round={id:string;season_id:string;round_number:number;status:string;name:string};
+type Athlete={id:string;user_id:string};
+type Profile={id:string;full_name:string|null};
+type SeasonClass={season_id:string;athlete_id:string;class_number:number};
+type Entry={season_id:string;class_number:number;athlete_id:string;qualification_reason:string;annual_points:number;seed:number;group_name:string};
+type Match={id:string;season_id:string;round_id:string;class_number:number;draw_order:number|null;athlete_one_id:string;athlete_two_id:string|null;status:string;result_type:string|null;athlete_one_sets:number|null;athlete_two_sets:number|null;athlete_one_points:number|null;athlete_two_points:number|null;winner_athlete_id:string|null};
+type Row={key:string;athleteId:string;classNumber:number;name:string;points:number;wins:number;losses:number;matches:number};
 
-const classLabels = ["1ª Classe", "2ª Classe", "3ª Classe", "4ª Classe", "5ª Classe", "6ª Classe"];
-const finishedStatuses = ["result_submitted", "completed", "confirmed", "walkover"];
+const labels=["1ª Classe","2ª Classe","3ª Classe","4ª Classe","5ª Classe","6ª Classe"];
+const finished=["result_submitted","completed","confirmed","walkover"];
+function sortRows(rows:Row[]){return [...rows].sort((a,b)=>b.points-a.points||b.wins-a.wins||a.losses-b.losses||a.name.localeCompare(b.name));}
+function addMatch(row:Row,match:Match,id:string){const first=match.athlete_one_id===id;row.matches++;row.points+=first?match.athlete_one_points??0:match.athlete_two_points??0;if(match.result_type!=="double_walkover"&&match.winner_athlete_id){if(match.winner_athlete_id===id)row.wins++;else row.losses++;}}
+function MatchCard({match,names}:{match:Match;names:Record<string,string>}){const one=names[match.athlete_one_id]||"Atleta";const two=match.athlete_two_id?names[match.athlete_two_id]||"Atleta":"Coringa";const done=finished.includes(match.status);return <article className="rounded-xl border border-slate-800 bg-slate-950/60 p-4"><div className="flex flex-wrap items-center justify-between gap-2"><span className="text-xs text-slate-500">Confronto {match.draw_order??"-"}</span><span className={`rounded-full px-2 py-1 text-xs ${done?"bg-emerald-500/15 text-emerald-300":"bg-amber-500/15 text-amber-200"}`}>{done?"Resultado lançado":"Aguardando resultado"}</span></div><div className="mt-3 space-y-2 text-sm"><div className={`flex justify-between ${match.winner_athlete_id===match.athlete_one_id?"font-bold text-emerald-300":"text-slate-200"}`}><span>{one}</span><span>{match.athlete_one_points??0} pts · {match.athlete_one_sets??0} set</span></div><div className={`flex justify-between ${match.winner_athlete_id===match.athlete_two_id?"font-bold text-emerald-300":"text-slate-200"}`}><span>{two}</span><span>{match.athlete_two_points??0} pts · {match.athlete_two_sets??0} set</span></div></div></article>}
 
-function sortRows(rows: Row[]) {
-  return [...rows].sort((a, b) => b.points - a.points || b.wins - a.wins || a.losses - b.losses || a.name.localeCompare(b.name));
-}
-
-function addMatch(row: Row, match: Match, athleteId: string) {
-  const first = match.athlete_one_id === athleteId;
-  row.matches += 1;
-  row.points += first ? match.athlete_one_points ?? 0 : match.athlete_two_points ?? 0;
-  if (match.result_type !== "double_walkover" && match.winner_athlete_id) {
-    if (match.winner_athlete_id === athleteId) row.wins += 1;
-    else row.losses += 1;
-  }
-}
-
-function matchLabel(status: string) {
-  return finishedStatuses.includes(status) ? "Resultado lançado" : "Aguardando resultado";
-}
-
-function MatchCard({ match, names }: { match: Match; names: Record<string, string> }) {
-  const firstName = names[match.athlete_one_id] ?? "Atleta";
-  const secondName = match.athlete_two_id ? names[match.athlete_two_id] ?? "Atleta" : "Coringa";
-  const finished = finishedStatuses.includes(match.status);
-  return <article className="rounded-xl border border-slate-800 bg-slate-950/60 p-4"><div className="flex flex-wrap items-center justify-between gap-2"><span className="text-xs text-slate-500">Confronto {match.draw_order ?? "-"}</span><span className={`rounded-full px-2 py-1 text-xs ${finished ? "bg-emerald-500/15 text-emerald-300" : "bg-amber-500/15 text-amber-200"}`}>{matchLabel(match.status)}</span></div><div className="mt-3 space-y-2 text-sm"><div className={`flex items-center justify-between gap-3 ${match.winner_athlete_id === match.athlete_one_id ? "font-bold text-emerald-300" : "text-slate-200"}`}><span>{firstName}</span><span>{match.athlete_one_points ?? 0} pts · {match.athlete_one_sets ?? 0} set</span></div><div className={`flex items-center justify-between gap-3 ${match.winner_athlete_id === match.athlete_two_id ? "font-bold text-emerald-300" : "text-slate-200"}`}><span>{secondName}</span><span>{match.athlete_two_points ?? 0} pts · {match.athlete_two_sets ?? 0} set</span></div></div></article>;
-}
-
-export default function ClassificacaoPage() {
-  const supabase = createClient();
-  const [seasons, setSeasons] = useState<Season[]>([]);
-  const [rounds, setRounds] = useState<Round[]>([]);
-  const [athletes, setAthletes] = useState<Athlete[]>([]);
-  const [profiles, setProfiles] = useState<Record<string, Profile>>({});
-  const [seasonClasses, setSeasonClasses] = useState<SeasonClass[]>([]);
-  const [entries, setEntries] = useState<Entry[]>([]);
-  const [matches, setMatches] = useState<Match[]>([]);
-  const [mode, setMode] = useState<"season" | "annual" | "finals">("season");
-  const [selectedId, setSelectedId] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [updatedAt, setUpdatedAt] = useState("");
-
-  const load = useCallback(async () => {
-    const [seasonQuery, roundQuery, athleteQuery, classQuery, entryQuery, matchQuery] = await Promise.all([
-      supabase.from("seasons").select("id,name,year,status,season_type").order("created_at", { ascending: true }),
-      supabase.from("rounds").select("id,season_id,round_number,status,name"),
-      supabase.from("athletes").select("id,user_id"),
-      supabase.from("season_athlete_classes").select("season_id,athlete_id,class_number"),
-      supabase.from("finals_entries").select("season_id,class_number,athlete_id,qualification_reason,annual_points,seed,group_name"),
-      supabase.from("matches").select("id,season_id,round_id,class_number,draw_order,athlete_one_id,athlete_two_id,status,result_type,athlete_one_sets,athlete_two_sets,athlete_one_games,athlete_two_games,athlete_one_points,athlete_two_points,winner_athlete_id"),
-    ]);
-    if (seasonQuery.error || roundQuery.error || athleteQuery.error || classQuery.error || entryQuery.error || matchQuery.error) {
-      setError("Não foi possível atualizar a classificação.");
-      setLoading(false);
-      return;
-    }
-    const loadedAthletes = (athleteQuery.data ?? []) as Athlete[];
-    const userIds = [...new Set(loadedAthletes.map((athlete) => athlete.user_id))];
-    const profileQuery = userIds.length ? await supabase.from("profiles").select("id,full_name").in("id", userIds) : { data: [], error: null };
-    if (profileQuery.error) {
-      setError("Não foi possível carregar os nomes dos atletas.");
-      setLoading(false);
-      return;
-    }
-    const loadedSeasons = (seasonQuery.data ?? []) as Season[];
-    setSeasons(loadedSeasons);
-    setRounds((roundQuery.data ?? []) as Round[]);
-    setAthletes(loadedAthletes);
-    setProfiles(Object.fromEntries(((profileQuery.data ?? []) as Profile[]).map((profile) => [profile.id, profile])));
-    setSeasonClasses((classQuery.data ?? []) as SeasonClass[]);
-    setEntries((entryQuery.data ?? []) as Entry[]);
-    setMatches((matchQuery.data ?? []) as Match[]);
-    setSelectedId((current) => current || loadedSeasons.find((season) => season.season_type === "finals")?.id || loadedSeasons[0]?.id || "");
-    setUpdatedAt(new Date().toLocaleTimeString("pt-BR"));
-    setLoading(false);
-  }, [supabase]);
-
-  useEffect(() => {
-    void load();
-    const timer = window.setInterval(() => void load(), 15000);
-    const onFocus = () => void load();
-    window.addEventListener("focus", onFocus);
-    return () => { window.clearInterval(timer); window.removeEventListener("focus", onFocus); };
-  }, [load]);
-
-  const names = useMemo(() => Object.fromEntries(athletes.map((athlete) => [athlete.id, profiles[athlete.user_id]?.full_name || "Atleta"])), [athletes, profiles]);
-  const classMap = useMemo(() => new Map(seasonClasses.map((item) => [`${item.season_id}:${item.athlete_id}`, item.class_number])), [seasonClasses]);
-  const regularSeasons = useMemo(() => seasons.filter((season) => season.season_type !== "finals"), [seasons]);
-  const finals = useMemo(() => seasons.find((season) => season.season_type === "finals") ?? null, [seasons]);
-  const selected = seasons.find((season) => season.id === selectedId) ?? null;
-  const officialEntries = useMemo(() => entries.filter((entry) => finals && entry.season_id === finals.id), [entries, finals]);
-
-  const regularRows = useMemo(() => {
-    if (!selected || selected.season_type === "finals") return [];
-    const rows = new Map<string, Row>();
-    for (const athlete of athletes) {
-      const classNumber = classMap.get(`${selected.id}:${athlete.id}`);
-      if (classNumber) rows.set(athlete.id, { key: athlete.id, athleteId: athlete.id, classNumber, name: names[athlete.id] || "Atleta", points: 0, wins: 0, losses: 0, matches: 0 });
-    }
-    const closedRounds = new Set(rounds.filter((round) => round.season_id === selected.id && round.status === "closed").map((round) => round.id));
-    for (const match of matches) {
-      if (match.season_id !== selected.id || !closedRounds.has(match.round_id) || !finishedStatuses.includes(match.status)) continue;
-      const one = rows.get(match.athlete_one_id);
-      const two = match.athlete_two_id ? rows.get(match.athlete_two_id) : null;
-      if (one) addMatch(one, match, one.athleteId);
-      if (two) addMatch(two, match, two.athleteId);
-    }
-    return [...rows.values()].filter((row) => row.matches > 0 || row.points > 0);
-  }, [selected, athletes, classMap, names, rounds, matches]);
-
-  const annualRows = useMemo(() => {
-    const result = new Map<string, Row>();
-    for (const season of regularSeasons) {
-      const closedRounds = new Set(rounds.filter((round) => round.season_id === season.id && round.status === "closed").map((round) => round.id));
-      for (const match of matches) {
-        if (match.season_id !== season.id || !closedRounds.has(match.round_id) || !finishedStatuses.includes(match.status)) continue;
-        for (const athleteId of [match.athlete_one_id, match.athlete_two_id].filter(Boolean) as string[]) {
-          const classNumber = classMap.get(`${season.id}:${athleteId}`);
-          if (!classNumber) continue;
-          const key = `${athleteId}:${classNumber}`;
-          const row = result.get(key) ?? { key, athleteId, classNumber, name: names[athleteId] || "Atleta", points: 0, wins: 0, losses: 0, matches: 0 };
-          addMatch(row, match, athleteId);
-          result.set(key, row);
-        }
-      }
-    }
-    return [...result.values()];
-  }, [regularSeasons, rounds, matches, classMap, names]);
-
-  const finalsStages = useMemo(() => {
-    if (!finals) return [];
-    return [1, 2, 3].map((roundNumber) => {
-      const round = rounds.find((item) => item.season_id === finals.id && item.round_number === roundNumber);
-      const stageMatches = matches.filter((match) => match.season_id === finals.id && match.round_id === round?.id).sort((a, b) => (a.class_number - b.class_number) || ((a.draw_order ?? 0) - (b.draw_order ?? 0)));
-      return { roundNumber, round, matches: stageMatches };
-    });
-  }, [finals, rounds, matches]);
-
-  const groupedRows = (rows: Row[]) => classLabels.map((label, index) => ({ label, rows: sortRows(rows.filter((row) => row.classNumber === index + 1)) })).filter((group) => group.rows.length > 0);
-  const renderRanking = (rows: Row[]) => <div className="mt-6 grid gap-6 md:grid-cols-2">{groupedRows(rows).map((group) => <section key={group.label} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><div className="flex items-center justify-between"><h2 className="text-xl font-bold text-white">{group.label}</h2><span className="text-sm text-slate-400">{group.rows.length} atleta(s)</span></div><div className="mt-4 overflow-x-auto"><table className="min-w-full text-left text-sm"><thead className="border-b border-slate-800 text-slate-400"><tr><th className="px-3 py-2">Pos.</th><th className="px-3 py-2">Atleta</th><th className="px-3 py-2">Pontos</th><th className="px-3 py-2">V-D</th></tr></thead><tbody>{group.rows.map((row, index) => <tr key={row.key} className="border-b border-slate-800/70"><td className="px-3 py-2 text-white">{index + 1}</td><td className="px-3 py-2 text-slate-200">{row.name}</td><td className="px-3 py-2 font-semibold text-white">{row.points}</td><td className="px-3 py-2 text-slate-300">{row.wins}-{row.losses}</td></tr>)}</tbody></table></div></section>)}</div>;
-
-  const renderFinalsStage = (stage: { roundNumber: number; round?: Round; matches: Match[] }) => <section className="mt-6"><div className="rounded-xl border border-yellow-400/30 bg-yellow-400/10 p-4"><h3 className="text-xl font-bold text-yellow-100">{stage.roundNumber === 1 ? "Fase de grupos" : stage.roundNumber === 2 ? "Semifinais" : "Finais"}</h3><p className="mt-1 text-sm text-slate-300">{stage.matches.length ? `${stage.matches.filter((match) => finishedStatuses.includes(match.status)).length} de ${stage.matches.length} jogos com resultado.` : "Nenhum jogo criado ainda."}</p></div><div className="mt-4 grid gap-5 md:grid-cols-2">{classLabels.map((label, index) => { const classMatches = stage.matches.filter((match) => match.class_number === index + 1); return <section key={`${stage.roundNumber}:${label}`} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><h4 className="text-lg font-bold text-white">{label}</h4>{classMatches.length ? <div className="mt-3 space-y-3">{classMatches.map((match) => <MatchCard key={match.id} match={match} names={names} />)}</div> : <p className="mt-3 text-sm text-slate-500">Aguardando esta classe.</p>}</section>; })}</div></section>;
-
-  return <><Navigation /><main className="page-container py-10"><div className="mx-auto max-w-6xl"><Link href="/dashboard" className="text-sm text-emerald-400">← Voltar ao dashboard</Link><div className="mt-4 flex flex-wrap items-end justify-between gap-4"><div><h1 className="text-3xl font-bold text-white">Classificação</h1><p className="mt-2 text-slate-400">Temporadas regulares, Finals, ranking anual e classificados.</p>{updatedAt && <p className="mt-1 text-xs text-slate-500">Atualizado às {updatedAt}. Atualização automática a cada 15 segundos.</p>}</div><div className="flex flex-wrap gap-2 rounded-lg border border-slate-700 bg-slate-900 p-1"><button onClick={() => setMode("season")} className={`rounded-md px-4 py-2 text-sm ${mode === "season" ? "bg-emerald-500 text-slate-950" : "text-slate-300"}`}>Temporada</button><button onClick={() => setMode("annual")} className={`rounded-md px-4 py-2 text-sm ${mode === "annual" ? "bg-emerald-500 text-slate-950" : "text-slate-300"}`}>Ranking anual</button><button onClick={() => setMode("finals")} className={`rounded-md px-4 py-2 text-sm ${mode === "finals" ? "bg-emerald-500 text-slate-950" : "text-slate-300"}`}>Classificados Finals</button></div></div>{loading ? <section className="mt-8 rounded-2xl bg-slate-900/70 p-8 text-center text-slate-400">Carregando classificação...</section> : error ? <section className="mt-8 rounded-2xl bg-red-500/10 p-8 text-center text-red-300">{error}</section> : <><div className="mt-6 flex flex-wrap items-center gap-3">{mode === "season" && <select value={selectedId} onChange={(event) => setSelectedId(event.target.value)} className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white">{seasons.map((season) => <option key={season.id} value={season.id}>{season.name} {season.year}{season.season_type === "finals" ? " · Finals" : ""}</option>)}</select>}{mode === "annual" && <div className="rounded-xl border border-yellow-400/30 bg-yellow-400/10 px-4 py-3 text-sm text-yellow-100">Pontuação acumulada por usuário e classe em todas as temporadas regulares. O mesmo usuário pode aparecer em classes diferentes.</div>}</div>{mode === "finals" && <section className="mt-6"><div className="rounded-xl border border-yellow-400/30 bg-yellow-400/10 p-5"><h2 className="text-2xl font-bold text-yellow-100">Classificados para o Finals</h2><p className="mt-2 text-sm text-slate-300">Participantes oficiais por classe, seed e grupo.</p></div><div className="mt-6 grid gap-5 md:grid-cols-2">{classLabels.map((label, index) => <section key={label} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><h3 className="text-xl font-bold text-white">{label}</h3><div className="mt-3 space-y-2">{officialEntries.filter((entry) => entry.class_number === index + 1).sort((a, b) => a.seed - b.seed).map((entry, position) => <div key={`${entry.class_number}:${entry.athlete_id}`} className="rounded-xl border border-slate-800 bg-slate-950/50 p-3 text-sm text-slate-200">{position + 1}. {names[entry.athlete_id] || "Atleta"} · Grupo {entry.group_name} · Seed {entry.seed}</div>)}</div></section>)}</div></section>}{mode === "season" && selected?.season_type === "finals" && <section className="mt-6"><div className="rounded-xl border border-yellow-400/30 bg-yellow-400/10 p-5"><h2 className="text-2xl font-bold text-yellow-100">Classificação do Finals {selected.year}</h2><p className="mt-2 text-sm text-slate-300">Fase de grupos, semifinais e finais com seus respectivos resultados.</p></div>{finalsStages.map((stage) => renderFinalsStage(stage))}</section>}{mode !== "finals" && selected?.season_type !== "finals" && (mode === "annual" ? renderRanking(annualRows) : renderRanking(regularRows))}</>}</div></main></>;
+export default function ClassificacaoPage(){
+ const supabase=createClient();const [seasons,setSeasons]=useState<Season[]>([]);const [rounds,setRounds]=useState<Round[]>([]);const [athletes,setAthletes]=useState<Athlete[]>([]);const [profiles,setProfiles]=useState<Record<string,Profile>>({});const [seasonClasses,setSeasonClasses]=useState<SeasonClass[]>([]);const [entries,setEntries]=useState<Entry[]>([]);const [matches,setMatches]=useState<Match[]>([]);const [mode,setMode]=useState<"season"|"annual"|"finals">("season");const [selectedId,setSelectedId]=useState("");const [loading,setLoading]=useState(true);const [error,setError]=useState("");const [updatedAt,setUpdatedAt]=useState("");
+ const load=useCallback(async()=>{const [s,r,a,c,e,m]=await Promise.all([supabase.from("seasons").select("id,name,year,status,season_type").order("created_at",{ascending:true}),supabase.from("rounds").select("id,season_id,round_number,status,name"),supabase.from("athletes").select("id,user_id"),supabase.from("season_athlete_classes").select("season_id,athlete_id,class_number"),supabase.from("finals_entries").select("season_id,class_number,athlete_id,qualification_reason,annual_points,seed,group_name"),supabase.from("matches").select("id,season_id,round_id,class_number,draw_order,athlete_one_id,athlete_two_id,status,result_type,athlete_one_sets,athlete_two_sets,athlete_one_points,athlete_two_points,winner_athlete_id")]);if(s.error||r.error||a.error||c.error||e.error||m.error){setError("Não foi possível atualizar a classificação.");setLoading(false);return;}const aa=(a.data??[]) as Athlete[];const ids=[...new Set(aa.map(x=>x.user_id))];const p=ids.length?await supabase.from("profiles").select("id,full_name").in("id",ids):{data:[],error:null};if(p.error){setError("Não foi possível carregar os nomes dos atletas.");setLoading(false);return;}const loaded=(s.data??[]) as Season[];setSeasons(loaded);setRounds((r.data??[]) as Round[]);setAthletes(aa);setProfiles(Object.fromEntries(((p.data??[]) as Profile[]).map(x=>[x.id,x])));setSeasonClasses((c.data??[]) as SeasonClass[]);setEntries((e.data??[]) as Entry[]);setMatches((m.data??[]) as Match[]);setSelectedId(current=>current||loaded.find(x=>x.season_type==='finals')?.id||loaded[0]?.id||"");setUpdatedAt(new Date().toLocaleTimeString('pt-BR'));setLoading(false);},[supabase]);
+ useEffect(()=>{void load();const timer=window.setInterval(()=>void load(),15000);const focus=()=>void load();window.addEventListener('focus',focus);return()=>{window.clearInterval(timer);window.removeEventListener('focus',focus);};},[load]);
+ const names=useMemo(()=>Object.fromEntries(athletes.map(a=>[a.id,profiles[a.user_id]?.full_name||'Atleta'])),[athletes,profiles]);const classMap=useMemo(()=>new Map(seasonClasses.map(x=>[`${x.season_id}:${x.athlete_id}`,x.class_number])),[seasonClasses]);const regular=useMemo(()=>seasons.filter(s=>s.season_type!=='finals'),[seasons]);const finals=useMemo(()=>seasons.find(s=>s.season_type==='finals')||null,[seasons]);const selected=seasons.find(s=>s.id===selectedId)||null;
+ const regularRows=useMemo(()=>{if(!selected||selected.season_type==='finals')return[];const rows=new Map<string,Row>();for(const a of athletes){const c=classMap.get(`${selected.id}:${a.id}`);if(c)rows.set(a.id,{key:a.id,athleteId:a.id,classNumber:c,name:names[a.id]||'Atleta',points:0,wins:0,losses:0,matches:0});}const closed=new Set(rounds.filter(r=>r.season_id===selected.id&&r.status==='closed').map(r=>r.id));for(const m of matches){if(m.season_id!==selected.id||!closed.has(m.round_id)||!finished.includes(m.status))continue;const one=rows.get(m.athlete_one_id);const two=m.athlete_two_id?rows.get(m.athlete_two_id):null;if(one)addMatch(one,m,one.athleteId);if(two)addMatch(two,m,two.athleteId);}return [...rows.values()].filter(x=>x.matches>0||x.points>0);},[selected,athletes,classMap,names,rounds,matches]);
+ const annualRows=useMemo(()=>{const result=new Map<string,Row>();for(const season of regular){const closed=new Set(rounds.filter(r=>r.season_id===season.id&&r.status==='closed').map(r=>r.id));for(const m of matches){if(m.season_id!==season.id||!closed.has(m.round_id)||!finished.includes(m.status))continue;for(const id of [m.athlete_one_id,m.athlete_two_id].filter(Boolean) as string[]){const c=classMap.get(`${season.id}:${id}`);if(!c)continue;const key=`${id}:${c}`;const row=result.get(key)||{key,athleteId:id,classNumber:c,name:names[id]||'Atleta',points:0,wins:0,losses:0,matches:0};addMatch(row,m,id);result.set(key,row);}}}return [...result.values()];},[regular,rounds,matches,classMap,names]);
+ const candidateKeys=useMemo(()=>new Set(annualRows.flatMap((row)=>sortRows(annualRows.filter(x=>x.classNumber===row.classNumber)).slice(0,8).map(x=>x.key))),[annualRows]);
+ const official=useMemo(()=>entries.filter(e=>finals&&e.season_id===finals.id),[entries,finals]);
+ const stages=useMemo(()=>finals?[1,2,3].map(n=>{const round=rounds.find(r=>r.season_id===finals.id&&r.round_number===n);return{n,matches:matches.filter(m=>m.season_id===finals.id&&m.round_id===round?.id).sort((a,b)=>(a.class_number-b.class_number)||((a.draw_order??0)-(b.draw_order??0)))} }):[],[finals,rounds,matches]);
+ const groups=(rows:Row[])=>labels.map((label,i)=>({label,rows:sortRows(rows.filter(x=>x.classNumber===i+1))})).filter(x=>x.rows.length);const renderRanking=(rows:Row[],annual=false)=><div className="mt-6 grid gap-6 md:grid-cols-2">{groups(rows).map(g=><section key={g.label} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><div className="flex items-center justify-between"><h2 className="text-xl font-bold text-white">{g.label}</h2><span className="text-sm text-slate-400">{g.rows.length} atleta(s)</span></div>{annual&&<p className="mt-2 text-xs text-yellow-200">⭐ Candidato ao Finals: entre os 8 primeiros da classe nesta atualização.</p>}<div className="mt-4 overflow-x-auto"><table className="min-w-full text-left text-sm"><thead className="border-b border-slate-800 text-slate-400"><tr><th className="px-3 py-2">Pos.</th><th className="px-3 py-2">Atleta</th><th className="px-3 py-2">Pontos</th><th className="px-3 py-2">V-D</th></tr></thead><tbody>{g.rows.map((row,i)=>{const candidate=annual&&candidateKeys.has(row.key);return <tr key={row.key} className={`border-b border-slate-800/70 ${candidate?'bg-yellow-400/10':''}`}><td className="px-3 py-2 text-white">{i+1}</td><td className={`px-3 py-2 ${candidate?'font-semibold text-yellow-100':'text-slate-200'}`}>{candidate?'⭐ ':''}{row.name}</td><td className="px-3 py-2 font-semibold text-white">{row.points}</td><td className="px-3 py-2 text-slate-300">{row.wins}-{row.losses}</td></tr>})}</tbody></table></div></section>)}</div>;
+ const renderStage=(stage:{n:number;matches:Match[]})=><section className="mt-6"><div className="rounded-xl border border-yellow-400/30 bg-yellow-400/10 p-4"><h3 className="text-xl font-bold text-yellow-100">{stage.n===1?'Fase de grupos':stage.n===2?'Semifinais':'Finais'}</h3><p className="mt-1 text-sm text-slate-300">{stage.matches.length?`${stage.matches.filter(m=>finished.includes(m.status)).length} de ${stage.matches.length} jogos com resultado.`:'Nenhum jogo criado ainda.'}</p></div><div className="mt-4 grid gap-5 md:grid-cols-2">{labels.map((label,i)=>{const ms=stage.matches.filter(m=>m.class_number===i+1);return <section key={`${stage.n}:${label}`} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><h4 className="text-lg font-bold text-white">{label}</h4>{ms.length?<div className="mt-3 space-y-3">{ms.map(m=><MatchCard key={m.id} match={m} names={names}/>)}</div>:<p className="mt-3 text-sm text-slate-500">Aguardando esta classe.</p>}</section>})}</div></section>;
+ return <><Navigation/><main className="page-container py-10"><div className="mx-auto max-w-6xl"><Link href="/dashboard" className="text-sm text-emerald-400">← Voltar ao dashboard</Link><div className="mt-4 flex flex-wrap items-end justify-between gap-4"><div><h1 className="text-3xl font-bold text-white">Classificação</h1><p className="mt-2 text-slate-400">Temporadas regulares, Finals, ranking anual e classificados.</p>{updatedAt&&<p className="mt-1 text-xs text-slate-500">Atualizado às {updatedAt}. Atualização automática a cada 15 segundos.</p>}</div><div className="flex flex-wrap gap-2 rounded-lg border border-slate-700 bg-slate-900 p-1"><button onClick={()=>setMode('season')} className={`rounded-md px-4 py-2 text-sm ${mode==='season'?'bg-emerald-500 text-slate-950':'text-slate-300'}`}>Temporada</button><button onClick={()=>setMode('annual')} className={`rounded-md px-4 py-2 text-sm ${mode==='annual'?'bg-emerald-500 text-slate-950':'text-slate-300'}`}>Ranking anual</button><button onClick={()=>setMode('finals')} className={`rounded-md px-4 py-2 text-sm ${mode==='finals'?'bg-emerald-500 text-slate-950':'text-slate-300'}`}>Classificados Finals</button></div></div>{loading?<section className="mt-8 rounded-2xl bg-slate-900/70 p-8 text-center text-slate-400">Carregando classificação...</section>:error?<section className="mt-8 rounded-2xl bg-red-500/10 p-8 text-center text-red-300">{error}</section>:<><div className="mt-6 flex flex-wrap items-center gap-3">{mode==='season'&&<select value={selectedId} onChange={e=>setSelectedId(e.target.value)} className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white">{seasons.map(s=><option key={s.id} value={s.id}>{s.name} {s.year}{s.season_type==='finals'?' · Finals':''}</option>)}</select>}{mode==='annual'&&<div className="rounded-xl border border-yellow-400/30 bg-yellow-400/10 px-4 py-3 text-sm text-yellow-100">⭐ Os 8 primeiros de cada classe são candidatos ao Finals nesta atualização. O destaque muda após cada rodada encerrada.</div>}</div>{mode==='finals'&&<section className="mt-6"><div className="rounded-xl border border-yellow-400/30 bg-yellow-400/10 p-5"><h2 className="text-2xl font-bold text-yellow-100">Classificados para o Finals</h2><p className="mt-2 text-sm text-slate-300">Participantes oficiais por classe, seed e grupo.</p></div><div className="mt-6 grid gap-5 md:grid-cols-2">{labels.map((label,i)=><section key={label} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><h3 className="text-xl font-bold text-white">{label}</h3><div className="mt-3 space-y-2">{official.filter(e=>e.class_number===i+1).sort((a,b)=>a.seed-b.seed).map((e,pos)=><div key={`${e.class_number}:${e.athlete_id}`} className="rounded-xl border border-slate-800 bg-slate-950/50 p-3 text-sm text-slate-200">{pos+1}. {names[e.athlete_id]||'Atleta'} · Grupo {e.group_name} · Seed {e.seed}</div>)}</div></section>)}</div></section>}{mode==='season'&&selected?.season_type==='finals'&&<section className="mt-6"><div className="rounded-xl border border-yellow-400/30 bg-yellow-400/10 p-5"><h2 className="text-2xl font-bold text-yellow-100">Classificação do Finals {selected.year}</h2><p className="mt-2 text-sm text-slate-300">Fase de grupos, semifinais e finais com seus respectivos resultados.</p></div>{stages.map(renderStage)}</section>}{mode!=='finals'&&selected?.season_type!=='finals'&&(mode==='annual'?renderRanking(annualRows,true):renderRanking(regularRows,false))}</>}</div></main></>;
 }
