@@ -7,8 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 
 const ADMIN_EMAIL = "eng.durvalneto@gmail.com";
 const links = [["/dashboard", "Início"], ["/partidas", "Partidas"], ["/classificacao", "Classificação"], ["/temporadas", "Temporadas"], ["/historico", "Histórico"], ["/notificacoes", "Notificações"]] as const;
-type RoleRow = { role: string | null };
-type RoleQueryResult = { data: RoleRow | null; error: { message: string } | null };
+type Role = { role: string | null };
 
 export default function Navigation() {
   const pathname = usePathname();
@@ -19,31 +18,39 @@ export default function Navigation() {
   const supabase = createClient();
 
   useEffect(() => {
-    let mounted = true;
-    const load = async () => {
+    let active = true;
+    const loadUser = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-      const { data: roleRow } = (await supabase.from("user_roles").select("role").eq("user_id", user.id).maybeSingle()) as unknown as RoleQueryResult;
-      if (mounted) {
-        setUserEmail(user.email?.toLowerCase() ?? null);
-        setIsAdmin(user.email?.toLowerCase() === ADMIN_EMAIL || roleRow?.role === "admin" || user.app_metadata?.role === "admin");
+      const { data: role } = await supabase.from("user_roles").select("role").eq("user_id", user.id).maybeSingle() as { data: Role | null };
+      if (active) {
+        const email = user.email?.toLowerCase() ?? null;
+        setUserEmail(email);
+        setIsAdmin(email === ADMIN_EMAIL || role?.role === "admin" || user.app_metadata?.role === "admin");
       }
     };
-    void load();
-    const { data: subscription } = supabase.auth.onAuthStateChange(() => { void load(); });
-    return () => { mounted = false; subscription.subscription.unsubscribe(); };
+    void loadUser();
+    const subscription = supabase.auth.onAuthStateChange(() => { void loadUser(); });
+    return () => { active = false; subscription.data.subscription.unsubscribe(); };
   }, [supabase]);
+
+  useEffect(() => {
+    if (!["/partidas", "/classificacao", "/historico", "/notificacoes"].includes(pathname)) return;
+    let active = true;
+    let previousSignature = "";
+    const checkRoundClosures = async () => {
+      const { data, error } = await supabase.from("rounds").select("id,season_id,round_number,status,updated_at").order("id");
+      if (!active || error) return;
+      const signature = (data ?? []).map((round) => `${round.id}:${round.season_id}:${round.round_number}:${round.status}:${round.updated_at ?? ""}`).join("|");
+      if (previousSignature && signature !== previousSignature) window.location.reload();
+      previousSignature = signature;
+    };
+    void checkRoundClosures();
+    const timer = window.setInterval(() => { void checkRoundClosures(); }, 5000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [pathname, supabase]);
 
   const signOut = async () => { await supabase.auth.signOut(); router.replace("/login"); router.refresh(); };
 
-  return (
-    <header className="sticky top-0 z-40 border-b border-slate-800 bg-slate-950/95 text-white backdrop-blur">
-      <nav className="page-container flex min-h-16 items-center justify-between gap-4 py-3" aria-label="Navegação principal">
-        <div className="flex items-center gap-4"><button type="button" onClick={() => setMenuOpen((value) => !value)} className="rounded-lg border border-slate-700 px-3 py-2 text-sm lg:hidden">Menu</button><Link href="/dashboard" className="font-bold">Ranking <span className="text-emerald-400">Smash</span></Link></div>
-        <div className="hidden items-center gap-1 lg:flex">{links.map(([href, label]) => <Link key={href} href={href} className={`rounded-xl px-3 py-2 text-sm font-semibold ${pathname === href || pathname.startsWith(`${href}/`) ? "bg-emerald-500 text-slate-950" : "text-slate-300 hover:bg-slate-800"}`}>{label}</Link>)}{isAdmin && <Link href="/admin" className={`rounded-xl px-3 py-2 text-sm font-semibold ${pathname.startsWith("/admin") ? "bg-emerald-500 text-slate-950" : "text-slate-300 hover:bg-slate-800"}`}>Administração</Link>}</div>
-        <div className="flex items-center gap-2"><Link href="/perfil" className="hidden text-right sm:block"><span className="block text-sm font-semibold">Minha conta</span><span className="block text-xs text-slate-400">{isAdmin ? "Administrador" : "Atleta"}</span></Link><button type="button" onClick={() => void signOut()} className="hidden rounded-lg border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-800 sm:block">Sair</button></div>
-      </nav>
-      {menuOpen && <div className="border-t border-slate-800 bg-slate-950 px-4 py-4 lg:hidden"><div className="page-container flex flex-col gap-2">{links.map(([href, label]) => <Link key={href} href={href} onClick={() => setMenuOpen(false)} className="rounded-xl px-3 py-2 text-sm font-semibold text-slate-300 hover:bg-slate-800">{label}</Link>)}{isAdmin && <Link href="/admin" onClick={() => setMenuOpen(false)} className="rounded-xl px-3 py-2 text-sm font-semibold text-slate-300 hover:bg-slate-800">Administração</Link>}<button type="button" onClick={() => void signOut()} className="mt-2 rounded-xl border border-red-500/30 px-3 py-2 text-left text-sm font-semibold text-red-300">Sair da conta</button></div></div>}
-    </header>
-  );
+  return <header className="sticky top-0 z-40 border-b border-slate-800 bg-slate-950/95 text-white backdrop-blur"><nav className="page-container flex min-h-16 items-center justify-between gap-4" aria-label="Navegação principal"><div className="flex items-center gap-4"><button type="button" onClick={() => setMenuOpen((value) => !value)} className="rounded-lg border border-slate-700 px-3 py-2 text-sm lg:hidden">Menu</button><Link href="/dashboard" className="font-bold">Ranking <span className="text-emerald-400">Smash</span></Link></div><div className="hidden items-center gap-1 lg:flex">{links.map(([href, label]) => <Link key={href} href={href} className={`rounded-xl px-3 py-2 text-sm font-semibold ${pathname === href || pathname.startsWith(`${href}/`) ? "bg-emerald-500 text-slate-950" : "text-slate-300 hover:bg-slate-800"}`}>{label}</Link>)}{isAdmin && <Link href="/admin" className={`rounded-xl px-3 py-2 text-sm font-semibold ${pathname.startsWith("/admin") ? "bg-emerald-500 text-slate-950" : "text-slate-300 hover:bg-slate-800"}`}>Administração</Link>}</div><div className="flex items-center gap-2"><Link href="/perfil" className="hidden text-right sm:block"><span className="block text-sm font-semibold">Minha conta</span><span className="block text-xs text-slate-400">{isAdmin ? "Administrador" : "Atleta"}</span></Link><button type="button" onClick={() => void signOut()} className="hidden rounded-lg border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-800 sm:block">Sair</button></div></nav>{menuOpen && <div className="border-t border-slate-800 bg-slate-950 px-4 py-4 lg:hidden"><div className="page-container flex flex-col gap-2">{links.map(([href, label]) => <Link key={href} href={href} onClick={() => setMenuOpen(false)} className="rounded-xl px-3 py-2 text-sm font-semibold text-slate-300 hover:bg-slate-800">{label}</Link>)}{isAdmin && <Link href="/admin" onClick={() => setMenuOpen(false)} className="rounded-xl px-3 py-2 text-sm font-semibold text-slate-300 hover:bg-slate-800">Administração</Link>}<button type="button" onClick={() => void signOut()} className="mt-2 rounded-xl border border-red-500/30 px-3 py-2 text-left text-sm font-semibold text-red-300">Sair da conta</button></div></div>}</header>;
 }
