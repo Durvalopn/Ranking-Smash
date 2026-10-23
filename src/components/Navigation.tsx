@@ -8,6 +8,7 @@ import { createClient } from "@/lib/supabase/client";
 const ADMIN_EMAIL = "eng.durvalneto@gmail.com";
 const links = [["/dashboard", "Início"], ["/partidas", "Partidas"], ["/classificacao", "Classificação"], ["/temporadas", "Temporadas"], ["/historico", "Histórico"], ["/notificacoes", "Notificações"]] as const;
 type Role = { role: string | null };
+type RoundSnapshot = { id: string; season_id: string; round_number: number; status: string; updated_at: string | null };
 
 export default function Navigation() {
   const pathname = usePathname();
@@ -39,9 +40,10 @@ export default function Navigation() {
     let active = true;
     let previousSignature = "";
     const checkRoundClosures = async () => {
-      const { data, error } = await supabase.from("rounds").select("id,season_id,round_number,status,updated_at").order("id");
-      if (!active || error) return;
-      const signature = (data ?? []).map((round) => `${round.id}:${round.season_id}:${round.round_number}:${round.status}:${round.updated_at ?? ""}`).join("|");
+      const roundQuery = await supabase.from("rounds").select("id,season_id,round_number,status,updated_at").order("id");
+      if (!active || roundQuery.error) return;
+      const roundRows = (roundQuery.data ?? []) as RoundSnapshot[];
+      const signature = roundRows.map((round) => `${round.id}:${round.season_id}:${round.round_number}:${round.status}:${round.updated_at ?? ""}`).join("|");
       if (previousSignature && signature !== previousSignature) window.location.reload();
       previousSignature = signature;
     };
