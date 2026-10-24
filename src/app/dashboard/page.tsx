@@ -43,5 +43,5 @@ export default async function DashboardPage(){
  const opponentProfiles=(profileData??[]) as OpponentProfile[];
  const names=new Map(opponents.map(a=>[a.id,opponentProfiles.find(p=>p.id===a.user_id)?.full_name??"Atleta"]));
  const dashboardMatches=currentMatches.map(m=>({...m,athlete_one_name:names.get(m.athlete_one_id)??"Você",athlete_two_name:m.athlete_two_id?(names.get(m.athlete_two_id)??"Atleta"):null}));
- return <><Navigation/><AthleteDashboard athleteName={athleteName} athleteClass={athleteClass} athleteStatus={athleteStatus} seasonName={`${season.name} ${season.year}`} seasonType={season.season_type} currentRound={currentRound?.round_number??0} totalRounds={season.rounds_count??rounds.length} roundDeadline={currentRound?.closes_at??null} matches={dashboardMatches} standings={standings} /></>;
+ return <><Navigation/><AthleteDashboard athleteId={athlete.id} athleteName={athleteName} athleteClass={athleteClass} athleteStatus={athleteStatus} seasonName={`${season.name} ${season.year}`} seasonType={season.season_type} currentRound={currentRound?.round_number??0} totalRounds={season.rounds_count??rounds.length} roundDeadline={currentRound?.closes_at??null} matches={dashboardMatches} standings={standings} /></>;
 }
