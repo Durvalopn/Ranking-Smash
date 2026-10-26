@@ -8,8 +8,6 @@ const PROTECTED_ROUTES = ["/dashboard", "/perfil", "/partidas", "/classificacao"
 const ADMIN_ROUTES = ["/admin"];
 
 type CookieToSet = { name: string; value: string; options?: unknown };
-type ProfileRoleRow = { role?: "admin" | "atleta" | "user" | null };
-type RoleRow = { role?: string | null };
 
 function matchesRoute(pathname: string, routes: string[]) {
   return routes.some((route) => pathname === route || pathname.startsWith(`${route}/`));
@@ -59,18 +57,9 @@ export async function middleware(request: NextRequest) {
   }
 
   if (isAdminRoute && user) {
-    const emailIsAdmin = user.email?.trim().toLowerCase() === ADMIN_EMAIL;
-    let isAdmin = emailIsAdmin;
-
-    if (!isAdmin) {
-      const { data: roleData, error: roleError } = await supabase
-        .from("user_roles")
-        .select("role")
-        .eq("user_id", user.id)
-        .maybeSingle();
-      const roleRow = roleData as RoleRow | null;
-      isAdmin = !roleError && roleRow?.role?.trim().toLowerCase() === "admin";
-    }
+    const isAdmin =
+      user.email?.trim().toLowerCase() === ADMIN_EMAIL ||
+      user.app_metadata?.role === "admin";
 
     if (!isAdmin) {
       const dashboardUrl = request.nextUrl.clone();
