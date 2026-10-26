@@ -1,16 +1,31 @@
 import { NextResponse } from "next/server";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import type { AthleteStatus } from "@/types/database";
+import type { AthleteStatus, Database } from "@/types/database";
 
 const ADMIN_EMAIL = "eng.durvalneto@gmail.com";
 const statuses: AthleteStatus[] = ["active", "licensed", "inactive", "pendente"];
+type StatusClient = ReturnType<typeof createSupabaseClient<Database>>;
 
 function isAdmin(user: { id: string; email?: string; app_metadata?: Record<string, unknown> }) {
   return user.email?.trim().toLowerCase() === ADMIN_EMAIL || user.app_metadata?.role === "admin";
 }
 
-async function hasFirstRoundBeenDrawn(db: ReturnType<typeof createAdminClient>) {
+function createUserDataClient(accessToken: string): StatusClient {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !supabaseAnonKey) {
+    throw new Error("A configuração pública do Supabase não está disponível no servidor.");
+  }
+
+  return createSupabaseClient<Database>(supabaseUrl, supabaseAnonKey, {
+    global: { headers: { Authorization: `Bearer ${accessToken}` } },
+    auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
+  });
+}
+
+async function hasFirstRoundBeenDrawn(db: StatusClient) {
   const { data: seasons, error: seasonError } = await db
     .from("seasons")
     .select("id,status,created_at")
@@ -43,6 +58,10 @@ export async function PATCH(request: Request) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Faça login para alterar seu status." }, { status: 401 });
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.access_token) {
+    return NextResponse.json({ error: "Sua sessão expirou. Entre novamente para alterar o status." }, { status: 401 });
+  }
 
   let body: { status?: unknown; athleteId?: unknown };
   try {
@@ -66,21 +85,51 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "Você só pode alterar seu próprio status." }, { status: 403 });
   }
 
-  let db: ReturnType<typeof createAdminClient>;
+  if (admin && typeof body.athleteId === "string") {
+    let db: ReturnType<typeof createAdminClient>;
+    try {
+      db = createAdminClient();
+    } catch (error) {
+      console.error("[athlete/status] cliente administrativo indisponível para alterar outro atleta", error);
+      return NextResponse.json(
+        { error: "A alteração de status de outros atletas requer SUPABASE_SERVICE_ROLE_KEY no servidor." },
+        { status: 503 },
+      );
+    }
+    const { data: athlete, error: athleteError } = await db
+      .from("athletes")
+      .select("id,user_id")
+      .eq("id", body.athleteId)
+      .maybeSingle();
+    if (athleteError || !athlete) {
+      return NextResponse.json({ error: "Jogador não encontrado." }, { status: 404 });
+    }
+
+    const { error } = await db.from("athletes").update({ status }).eq("id", athlete.id);
+    if (error) {
+      return NextResponse.json({ error: "Não foi possível atualizar o status do jogador." }, { status: 500 });
+    }
+    return NextResponse.json({ status });
+  }
+
+  let userDb: StatusClient;
   try {
-    db = createAdminClient();
-  } catch {
+    userDb = createUserDataClient(session.access_token);
+  } catch (error) {
+    console.error("[athlete/status] cliente autenticado indisponível", error);
     return NextResponse.json({ error: "A alteração de status não está disponível no servidor." }, { status: 503 });
   }
-  const athleteQuery = db.from("athletes").select("id,user_id");
-  const athleteColumn = admin && typeof body.athleteId === "string" ? "id" : "user_id";
-  const athleteId = athleteColumn === "id" && typeof body.athleteId === "string" ? body.athleteId : user.id;
-  const { data: athlete, error: athleteError } = await athleteQuery.eq(athleteColumn, athleteId).maybeSingle();
+
+  const { data: athlete, error: athleteError } = await userDb
+    .from("athletes")
+    .select("id,user_id")
+    .eq("user_id", user.id)
+    .maybeSingle();
   if (athleteError || !athlete) return NextResponse.json({ error: "Jogador não encontrado." }, { status: 404 });
 
   if (!admin && status === "pendente") {
     try {
-      if (await hasFirstRoundBeenDrawn(db)) {
+      if (await hasFirstRoundBeenDrawn(userDb)) {
         return NextResponse.json({ error: "Pendente só pode ser escolhido antes do sorteio da primeira rodada." }, { status: 409 });
       }
     } catch (error) {
@@ -88,7 +137,7 @@ export async function PATCH(request: Request) {
     }
   }
 
-  const { error } = await db.from("athletes").update({ status }).eq("id", athlete.id);
+  const { error } = await userDb.from("athletes").update({ status }).eq("id", athlete.id);
   if (error) return NextResponse.json({ error: "Não foi possível atualizar o status do jogador." }, { status: 500 });
   return NextResponse.json({ status });
 }
@@ -99,7 +148,12 @@ export async function GET() {
   if (!user) return NextResponse.json({ error: "Faça login para consultar seu status." }, { status: 401 });
   if (isAdmin(user)) return NextResponse.json({ canChoosePending: true });
   try {
-    const canChoosePending = !(await hasFirstRoundBeenDrawn(createAdminClient()));
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) {
+      return NextResponse.json({ error: "Sua sessão expirou. Entre novamente." }, { status: 401 });
+    }
+    const userDb = createUserDataClient(session.access_token);
+    const canChoosePending = !(await hasFirstRoundBeenDrawn(userDb));
     return NextResponse.json({ canChoosePending });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Não foi possível validar o status." }, { status: 503 });
