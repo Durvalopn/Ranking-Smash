@@ -11,7 +11,7 @@ type Athlete = { id: string; user_id: string };
 type Profile = { id: string; full_name: string | null };
 type Movement = { id: string; season_id: string; athlete_id: string; from_class: number; to_class: number; movement_status: string; final_position: number | null; points: number | null; movement_reason: string | null; description: string | null };
 
-const labels = ["1ª Classe", "2ª Classe", "3ª Classe", "4ª Classe", "5ª Classe", "6ª Classe"];
+const labels = ["1ª Classe", "2ª Classe", "3ª Classe", "4ª Classe", "5ª Classe", "6ª Classe", "Feminino"];
 const isPromotion = (movement: Movement) => movement.movement_status === "promoted" || movement.to_class < movement.from_class;
 const isRelegation = (movement: Movement) => movement.movement_status === "relegated" || movement.to_class > movement.from_class;
 

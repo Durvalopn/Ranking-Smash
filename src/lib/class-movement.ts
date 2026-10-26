@@ -25,20 +25,20 @@ export function sortFinalStandings<T extends MovementRow>(rows: T[]): T[] {
   return [...rows].sort((a, b) => b.points - a.points || b.setBalance - a.setBalance || b.gameBalance - a.gameBalance || (a.birthDate ? new Date(a.birthDate).getTime() : Number.MAX_SAFE_INTEGER) - (b.birthDate ? new Date(b.birthDate).getTime() : Number.MAX_SAFE_INTEGER) || a.athleteId.localeCompare(b.athleteId));
 }
 
-export function calculateClassMovement(rows: MovementRow[], totalClasses = 6) {
+export function calculateClassMovement(rows: MovementRow[], totalClasses = 7) {
   const decisions: MovementDecision[] = [];
   for (let classNumber = 1; classNumber <= totalClasses; classNumber += 1) {
     const classRows = sortFinalStandings(rows.filter((row) => row.classNumber === classNumber));
     const eligible = classRows.filter(isEligible);
     const slots = movementSlots(eligible.length);
-    const promoted = new Set(classNumber === 1 ? [] : eligible.slice(0, slots).map((row) => row.athleteId));
+    const promoted = new Set(classNumber === 1 || classNumber === totalClasses ? [] : eligible.slice(0, slots).map((row) => row.athleteId));
     const relegated = new Set(classNumber === totalClasses ? [] : eligible.slice(Math.max(0, eligible.length - slots)).filter((row) => !promoted.has(row.athleteId)).map((row) => row.athleteId));
     classRows.forEach((row, index) => {
       const eligibleRow = isEligible(row);
       if (!eligibleRow) decisions.push({ ...row, finalPosition: index + 1, nextClass: classNumber, movementStatus: "not_eligible", reason: "Não elegível para movimentação", slots: 0 });
       else if (promoted.has(row.athleteId)) decisions.push({ ...row, finalPosition: index + 1, nextClass: classNumber - 1, movementStatus: "promoted", reason: `Acesso: top ${slots} da classe`, slots });
       else if (relegated.has(row.athleteId)) decisions.push({ ...row, finalPosition: index + 1, nextClass: classNumber + 1, movementStatus: "relegated", reason: `Rebaixamento: bottom ${slots} da classe`, slots });
-      else decisions.push({ ...row, finalPosition: index + 1, nextClass: classNumber, movementStatus: "stayed", reason: classNumber === 1 ? "Limite da Classe 1" : classNumber === totalClasses ? "Limite da Classe 6" : "Permanece na classe", slots });
+      else decisions.push({ ...row, finalPosition: index + 1, nextClass: classNumber, movementStatus: "stayed", reason: classNumber === 1 ? "Limite da Classe 1" : classNumber === totalClasses ? `Limite da Classe ${totalClasses}` : "Permanece na classe", slots });
     });
   }
   return decisions;

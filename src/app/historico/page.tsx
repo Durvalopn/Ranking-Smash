@@ -12,7 +12,7 @@ type Profile={id:string;full_name:string|null};
 type Match={id:string;season_id:string;round_id:string;class_number:number;athlete_one_id:string;athlete_two_id:string|null;status:string;result_type:string|null;athlete_one_sets:number|null;athlete_two_sets:number|null;athlete_one_games:number|null;athlete_two_games:number|null;athlete_one_points:number|null;athlete_two_points:number|null;winner_athlete_id:string|null};
 type HistoryItem={id:string;season:Season;round:Round;classNumber:number;opponent:string;type:string;status:string;sets:string;games:string;points:number;won:boolean;bye:boolean};
 const completed=["result_submitted","completed","confirmed","walkover"];
-const labels=["1ª Classe","2ª Classe","3ª Classe","4ª Classe","5ª Classe","6ª Classe"];
+const labels=["1ª Classe","2ª Classe","3ª Classe","4ª Classe","5ª Classe","6ª Classe","Feminino"];
 
 function resultType(m:Match){return m.result_type==="double_walkover"?"WO duplo":m.result_type==="walkover"?"WO":"Partida normal"}
 

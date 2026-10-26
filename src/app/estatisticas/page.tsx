@@ -14,7 +14,7 @@ type Stat = { matches: number; wins: number; losses: number; points: number; set
 type SeasonStat = Stat & { season: Season; classNumbers: number[]; roundsPlayed: number; roundsTotal: number };
 
 const finishedStatuses = ["result_submitted", "completed", "confirmed", "walkover"];
-const classLabels = ["1ª Classe", "2ª Classe", "3ª Classe", "4ª Classe", "5ª Classe", "6ª Classe"];
+const classLabels = ["1ª Classe", "2ª Classe", "3ª Classe", "4ª Classe", "5ª Classe", "6ª Classe", "Feminino"];
 const emptyStat = (): Stat => ({ matches: 0, wins: 0, losses: 0, points: 0, setsWon: 0, setsLost: 0, gamesWon: 0, gamesLost: 0, walkovers: 0, doubleWalkovers: 0 });
 
 function addMatch(stat: Stat, match: Match, athleteId: string) {

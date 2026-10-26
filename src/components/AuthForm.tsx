@@ -109,7 +109,7 @@ export default function AuthForm({ mode = "login" }: AuthFormProps) {
       return "Informe uma data de nascimento válida.";
     }
 
-    if (!/^[1-6]$/.test(classNumber)) {
+    if (!/^[1-7]$/.test(classNumber)) {
       return "Selecione uma classe válida.";
     }
 
@@ -326,6 +326,7 @@ export default function AuthForm({ mode = "login" }: AuthFormProps) {
                   <option value="4">4ª classe</option>
                   <option value="5">5ª classe</option>
                   <option value="6">6ª classe</option>
+                  <option value="7">Feminino</option>
                 </select>
               </div>
             </div>

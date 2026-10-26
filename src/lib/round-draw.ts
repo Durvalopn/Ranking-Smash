@@ -42,7 +42,7 @@ export function buildRoundDraw(athletes: DrawAthlete[], existing: ExistingMatch[
   const pairs: DrawPair[] = [];
   let drawOrder = 1;
 
-  for (let classNumber = 1; classNumber <= 6; classNumber += 1) {
+  for (let classNumber = 1; classNumber <= 7; classNumber += 1) {
     const eligible = athletes
       .filter((athlete) => athlete.current_class === classNumber && athlete.status === "active")
       .sort((left, right) => seededValue(seed, left.id) - seededValue(seed, right.id));

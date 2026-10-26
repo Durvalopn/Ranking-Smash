@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
-const classes = [1, 2, 3, 4, 5, 6];
+const classes = [1, 2, 3, 4, 5, 6, 7];
 
 type FormData = {
   fullName: string;
@@ -19,7 +19,7 @@ type AthleteQueryResult = { data: AthleteRecord | null; error: { message: string
 type AthleteUpdateTable = { update: (values: { current_class: number }) => any };
 
 function normalizeClass(value: unknown) {
-  const match = String(value ?? "").match(/[1-6]/);
+  const match = String(value ?? "").match(/[1-7]/);
   return match?.[0] ?? "";
 }
 
@@ -144,7 +144,7 @@ export default function EditarPerfilPage() {
             Classe que você joga
             <select value={form.classNumber} onChange={(event) => update("classNumber", event.target.value)} required className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-emerald-400">
               <option value="">Selecione sua classe</option>
-              {classes.map((item) => <option key={item} value={String(item)}>{item}ª Classe</option>)}
+              {classes.map((item) => <option key={item} value={String(item)}>{item === 7 ? "Feminino" : `${item}ª Classe`}</option>)}
             </select>
           </label>
 

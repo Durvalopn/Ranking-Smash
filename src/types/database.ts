@@ -17,7 +17,7 @@ export type Json =
   | Json[];
 
 export type UserRole = "athlete" | "admin";
-export type AthleteStatus = "active" | "licensed" | "inactive";
+export type AthleteStatus = "active" | "licensed" | "inactive" | "pendente";
 export type SeasonStatus =
   | "draft"
   | "registration"
@@ -928,7 +928,6 @@ export type Database = {
 
     Enums: {
       user_role: UserRole;
-      athlete_status: AthleteStatus;
       season_status: SeasonStatus;
       season_type: SeasonType;
       round_status: RoundStatus;

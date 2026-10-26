@@ -14,7 +14,7 @@ type Group={label:string;matches:Match[]};
 type RoundGroup={round:Round;groups:Group[]};
 type SeasonGroup={season:Season;rounds:RoundGroup[]};
 
-const classLabels=["1ª Classe","2ª Classe","3ª Classe","4ª Classe","5ª Classe","6ª Classe"];
+const classLabels=["1ª Classe","2ª Classe","3ª Classe","4ª Classe","5ª Classe","6ª Classe","Feminino"];
 const pendingStatuses=["scheduled","pending","awaiting_result","contested"];
 
 function statusLabel(match:Match){

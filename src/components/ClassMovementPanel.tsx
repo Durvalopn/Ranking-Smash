@@ -13,7 +13,7 @@ type MovementRecord = { season_id: string; athlete_id: string; from_class: numbe
 type QueryTable = any;
 
 const completedStatuses = ["result_submitted", "completed", "confirmed", "walkover"];
-const className = (value: number) => `${value}ª Classe`;
+const className = (value: number) => value === 7 ? "Feminino" : `${value}ª Classe`;
 
 export default function ClassMovementPanel() {
   const supabase = createClient();
@@ -68,7 +68,7 @@ export default function ClassMovementPanel() {
     const rows = new Map<string, { id: string; name: string; classNumber: number; points: number; sets: number; games: number }>();
     for (const athlete of athletes) {
       if (athlete.status !== "active" && athlete.status !== "licensed") continue;
-      rows.set(athlete.id, { id: athlete.id, name: profileMap[athlete.user_id] || "Atleta", classNumber: athlete.current_class, points: 0, sets: 0, games: 0 });
+      rows.set(athlete.id, { id: athlete.id, name: profileMap[athlete.user_id] || "Atleta", classNumber: athlete.current_class, points: athlete.status === "licensed" ? closedRoundIds.size * 3 : 0, sets: 0, games: 0 });
     }
     for (const match of matches) {
       if (match.season_id !== selectedSeason.id || !closedRoundIds.has(match.round_id) || !completedStatuses.includes(match.status)) continue;
@@ -85,12 +85,12 @@ export default function ClassMovementPanel() {
       }
     }
     const result: Decision[] = [];
-    for (let classNumber = 1; classNumber <= 6; classNumber += 1) {
+    for (let classNumber = 1; classNumber <= 7; classNumber += 1) {
       const ranking = [...rows.values()].filter((row) => row.classNumber === classNumber).sort((a, b) => b.points - a.points || b.sets - a.sets || b.games - a.games || a.name.localeCompare(b.name));
       const slots = Math.ceil(ranking.length * 0.2);
       ranking.forEach((row, index) => {
-        if (index < slots && classNumber > 1) result.push({ athleteId: row.id, name: row.name, fromClass: classNumber, toClass: classNumber - 1, movementStatus: "promoted", position: index + 1, points: row.points });
-        if (index >= ranking.length - slots && classNumber < 6) result.push({ athleteId: row.id, name: row.name, fromClass: classNumber, toClass: classNumber + 1, movementStatus: "relegated", position: index + 1, points: row.points });
+        if (index < slots && classNumber > 1 && classNumber < 7) result.push({ athleteId: row.id, name: row.name, fromClass: classNumber, toClass: classNumber - 1, movementStatus: "promoted", position: index + 1, points: row.points });
+        if (index >= ranking.length - slots && classNumber < 7) result.push({ athleteId: row.id, name: row.name, fromClass: classNumber, toClass: classNumber + 1, movementStatus: "relegated", position: index + 1, points: row.points });
       });
     }
     return result;
