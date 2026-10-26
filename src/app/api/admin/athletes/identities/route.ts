@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import type { Database } from "@/types/database";
 
 const ADMIN_EMAIL = "eng.durvalneto@gmail.com";
-const AUTH_LOOKUP_CONCURRENCY = 8;
+
+export const dynamic = "force-dynamic";
 
 type Athlete = Omit<
   Pick<Database["public"]["Tables"]["athletes"]["Row"], "id" | "user_id" | "current_class" | "status">,
@@ -20,104 +20,76 @@ function metadataName(metadata: Record<string, unknown>) {
   return null;
 }
 
+function logTechnicalError(context: string, error: unknown) {
+  console.error(`[admin/athletes/identities] ${context}`, error);
+}
+
 export async function GET() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  let supabase: Awaited<ReturnType<typeof createClient>>;
+  try {
+    supabase = await createClient();
+  } catch (error) {
+    logTechnicalError("falha ao criar cliente server-side", error);
+    return NextResponse.json({ error: "Não foi possível validar a sessão." }, { status: 500 });
+  }
+
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError) {
+    logTechnicalError("falha ao validar autenticação", authError);
+    return NextResponse.json({ error: "Não foi possível validar a sessão." }, { status: 500 });
+  }
   if (!user) return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
 
   if (user.email?.trim().toLowerCase() !== ADMIN_EMAIL && user.app_metadata?.role !== "admin") {
     return NextResponse.json({ error: "Acesso permitido somente ao administrador." }, { status: 403 });
   }
 
-  let admin: ReturnType<typeof createAdminClient>;
-  try {
-    admin = createAdminClient();
-  } catch {
-    return NextResponse.json({ error: "Consulta administrativa indisponível." }, { status: 503 });
-  }
-
-  const { data: athletes, error: athleteError } = await admin
+  const { data: athletes, error: athleteError } = await supabase
     .from("athletes")
     .select("id,user_id,current_class,status")
     .order("current_class");
   if (athleteError) {
-    console.error("[admin/athletes/identities] falha ao consultar atletas", {
-      code: athleteError.code,
-      message: athleteError.message,
-      details: athleteError.details,
-      hint: athleteError.hint,
-    });
-    return NextResponse.json({ error: "Não foi possível consultar identificações." }, { status: 500 });
+    logTechnicalError("falha ao consultar atletas com a sessão autenticada e as políticas RLS", athleteError);
+    return NextResponse.json(
+      { error: "Não foi possível consultar a lista de atletas. Verifique as permissões administrativas." },
+      { status: 500 },
+    );
   }
 
   const athleteRows = (athletes ?? []) as Athlete[];
   const userIds = [...new Set(athleteRows.map((athlete) => athlete.user_id))];
   const profileNames = new Map<string, string>();
   if (userIds.length > 0) {
-    const { data: profiles, error: profileError } = await admin
-      .from("profiles")
-      .select("id,full_name")
-      .in("id", userIds);
-    if (profileError) {
-      console.error("[admin/athletes/identities] falha ao consultar perfis", {
-        code: profileError.code,
-        message: profileError.message,
-        details: profileError.details,
-        hint: profileError.hint,
-      });
-    } else {
-      for (const profile of (profiles ?? []) as Profile[]) {
-        if (profile.full_name?.trim()) profileNames.set(profile.id, profile.full_name.trim());
-      }
-    }
-  }
-
-  const identities: Record<string, { name: string; email: string | null }> = {};
-  let nextIndex = 0;
-  async function resolveAuthUsers() {
-    while (nextIndex < userIds.length) {
-      const userId = userIds[nextIndex++];
-      let email: string | null = null;
-      try {
-        const { data, error } = await admin.auth.admin.getUserById(userId);
-        if (error) {
-          console.error("[admin/athletes/identities] falha ao consultar usuário de autenticação", {
-            status: error.status,
-            message: error.message,
-          });
-        } else {
-          email = data.user.email ?? null;
-          identities[userId] = {
-            name: profileNames.get(userId) ||
-              metadataName(data.user.user_metadata) ||
-              email?.split("@")[0] ||
-              `Atleta ${userId.slice(0, 8)}`,
-            email,
-          };
+    try {
+      const { data: profiles, error: profileError } = await supabase
+        .from("profiles")
+        .select("id,full_name")
+        .in("id", userIds);
+      if (profileError) {
+        logTechnicalError("falha ao consultar nomes em profiles; a lista será mantida", profileError);
+      } else {
+        for (const profile of (profiles ?? []) as Profile[]) {
+          if (profile.full_name?.trim()) profileNames.set(profile.id, profile.full_name.trim());
         }
-      } catch (error) {
-        console.error("[admin/athletes/identities] falha ao consultar usuário de autenticação", {
-          message: error instanceof Error ? error.message : "Erro desconhecido",
-        });
       }
-      if (!identities[userId]) {
-        identities[userId] = {
-          name: profileNames.get(userId) || `Atleta ${userId.slice(0, 8)}`,
-          email,
-        };
-      }
+    } catch (error) {
+      logTechnicalError("erro inesperado ao consultar profiles; a lista será mantida", error);
     }
   }
 
-  await Promise.all(
-    Array.from({ length: Math.min(AUTH_LOOKUP_CONCURRENCY, userIds.length) }, () => resolveAuthUsers()),
-  );
+  const currentUserName = metadataName(user.user_metadata) || user.email?.split("@")[0] || null;
+  const responseAthletes = athleteRows.map((athlete) => {
+    const isCurrentUser = athlete.user_id === user.id;
+    return {
+      ...athlete,
+      status: athlete.status === "ativo" ? "active" : athlete.status,
+      name: profileNames.get(athlete.user_id) ||
+        (isCurrentUser ? currentUserName : null) ||
+        `Atleta ${athlete.user_id.slice(0, 8)}`,
+      email: isCurrentUser ? user.email ?? null : null,
+    };
+  });
 
-  const responseAthletes = athleteRows.map((athlete) => ({
-    ...athlete,
-    status: athlete.status === "ativo" ? "active" : athlete.status,
-    ...identities[athlete.user_id],
-  }));
   return NextResponse.json(
     { athletes: responseAthletes },
     { headers: { "Cache-Control": "no-store, private" } },

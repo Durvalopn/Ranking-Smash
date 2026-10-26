@@ -26,6 +26,31 @@ function classLabel(classNumber: number) {
   return classNumber === 7 ? "Feminino" : `${classNumber}ª Classe`;
 }
 
+function sanitizeDiagnosticString(value: string) {
+  return value
+    .replace(/\beyJ[\w-]+\.[\w-]+\.[\w-]+\b/g, "[redigido]")
+    .replace(/\bsb_(?:secret|publishable)_[\w-]+\b/gi, "[redigido]")
+    .replace(/\bBearer\s+\S+/gi, "Bearer [redigido]")
+    .replace(/\b(?:SUPABASE|NEXT_PUBLIC_SUPABASE)_[A-Z0-9_]+\s*=\s*\S+/gi, "[variável de ambiente redigida]")
+    .replace(/\b(api[_-]?key|service[_-]?role|secret|password|access[_-]?token|refresh[_-]?token)([ "'=:]+)\S+/gi, "$1$2[redigido]");
+}
+
+function sanitizeDiagnosticBody(value: unknown): unknown {
+  if (typeof value === "string") return sanitizeDiagnosticString(value);
+  if (Array.isArray(value)) return value.map(sanitizeDiagnosticBody);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [
+        key,
+        /(token|secret|password|credential|api.?key|service.?role|authorization|^env$)/i.test(key)
+          ? "[redigido]"
+          : sanitizeDiagnosticBody(entry),
+      ]),
+    );
+  }
+  return value;
+}
+
 export default function AdminPlayersPage() {
   const [authorized, setAuthorized] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -33,7 +58,7 @@ export default function AdminPlayersPage() {
   const [currentSeason, setCurrentSeason] = useState<Season | null>(null);
   const [currentRound, setCurrentRound] = useState<Round | null>(null);
   const [matches, setMatches] = useState<Match[]>([]);
-  const [athleteLoadError, setAthleteLoadError] = useState(false);
+  const [athleteLoadError, setAthleteLoadError] = useState("");
   const [seasonLoadError, setSeasonLoadError] = useState(false);
   const [roundLoadError, setRoundLoadError] = useState(false);
   const [matchesLoadError, setMatchesLoadError] = useState(false);
@@ -57,19 +82,39 @@ export default function AdminPlayersPage() {
     try {
       athleteResponse = await fetch("/api/admin/athletes/identities", { cache: "no-store" });
     } catch {
-      console.error("[admin/jogadores] falha de rede ao carregar atletas");
-      setAthleteLoadError(true);
+      console.error("[admin/jogadores] falha de rede ao carregar atletas", {
+        status: "network-error",
+        body: null,
+        athleteCount: 0,
+      });
+      setAthleteLoadError("Não foi possível conectar à rota de identidades.");
       setLoading(false);
       return;
     }
+    const athleteResult = await athleteResponse.json().catch(() => null) as {
+      athletes?: Athlete[];
+      error?: unknown;
+      message?: unknown;
+    } | null;
+    const athleteCount = Array.isArray(athleteResult?.athletes) ? athleteResult.athletes.length : 0;
+    console.info("[admin/jogadores] resposta da rota de identidades", {
+      status: athleteResponse.status,
+      body: sanitizeDiagnosticBody(athleteResult),
+      athleteCount,
+    });
     if (!athleteResponse.ok) {
-      console.error("[admin/jogadores] falha ao carregar atletas", { status: athleteResponse.status });
-      setAthleteLoadError(true);
+      const responseMessage = typeof athleteResult?.message === "string"
+        ? athleteResult.message
+        : typeof athleteResult?.error === "string"
+          ? athleteResult.error
+          : athleteResponse.statusText || "Erro sem mensagem da rota.";
+      setAthleteLoadError(
+        `HTTP ${athleteResponse.status}: ${sanitizeDiagnosticString(responseMessage)}`,
+      );
       setLoading(false);
       return;
     }
-    const athleteResult = await athleteResponse.json() as { athletes?: Athlete[] };
-    const loadedAthletes = athleteResult.athletes ?? [];
+    const loadedAthletes = athleteResult?.athletes ?? [];
     setAthletes(loadedAthletes);
 
     const seasonQuery = await supabase
@@ -192,7 +237,7 @@ export default function AdminPlayersPage() {
           ) : !authorized ? (
             <p className="mt-8 rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-red-300">Acesso permitido somente ao administrador.</p>
           ) : athleteLoadError ? (
-            <p className="mt-8 rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-red-300">Não foi possível carregar os jogadores.</p>
+            <p className="mt-8 rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-red-300">Falha ao carregar jogadores: {athleteLoadError}</p>
           ) : (
             <div className="mt-6">
               {actionError && <p className="mb-4 rounded-lg bg-red-500/10 p-3 text-sm text-red-300">{actionError}</p>}
