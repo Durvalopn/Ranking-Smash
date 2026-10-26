@@ -14,7 +14,6 @@ async function hasFirstRoundBeenDrawn(db: ReturnType<typeof createAdminClient>) 
   const { data: seasons, error: seasonError } = await db
     .from("seasons")
     .select("id,status,created_at")
-    .neq("season_type", "finals")
     .in("status", ["active", "registration"])
     .order("created_at", { ascending: false });
   if (seasonError) throw new Error("Não foi possível verificar a temporada vigente.");
@@ -30,7 +29,7 @@ async function hasFirstRoundBeenDrawn(db: ReturnType<typeof createAdminClient>) 
     .maybeSingle();
   if (roundError) throw new Error("Não foi possível verificar o sorteio da primeira rodada.");
   if (!round) return false;
-  if (round.drawn_at || ["drawn", "open", "closed"].includes(round.status)) return true;
+  if (round.drawn_at || round.status === "drawn") return true;
 
   const { count, error: matchError } = await db
     .from("matches")
@@ -98,6 +97,7 @@ export async function GET() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Faça login para consultar seu status." }, { status: 401 });
+  if (isAdmin(user)) return NextResponse.json({ canChoosePending: true });
   try {
     const canChoosePending = !(await hasFirstRoundBeenDrawn(createAdminClient()));
     return NextResponse.json({ canChoosePending });

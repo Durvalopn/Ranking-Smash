@@ -5,7 +5,6 @@ import { createClient } from "@/lib/supabase/server";
 const ADMIN_EMAIL = "eng.durvalneto@gmail.com";
 const AUTH_LOOKUP_CONCURRENCY = 8;
 
-type Profile = { id: string; full_name: string | null };
 type Athlete = { user_id: string };
 
 function metadataName(metadata: Record<string, unknown>) {
@@ -39,16 +38,21 @@ export async function GET() {
   }
 
   const userIds = [...new Set(((athletes ?? []) as Athlete[]).map((athlete) => athlete.user_id))];
-  const profilesById = new Map<string, Profile>();
+  const profileIds = new Set<string>();
   if (userIds.length > 0) {
     const { data: profiles, error: profileError } = await admin
       .from("profiles")
-      .select("id,full_name")
+      .select("id")
       .in("id", userIds);
     if (profileError) {
-      console.error("[admin/athletes/identities] falha ao consultar perfis", { code: profileError.code });
+      console.error("[admin/athletes/identities] falha ao consultar perfis", {
+        code: profileError.code,
+        message: profileError.message,
+        details: profileError.details,
+        hint: profileError.hint,
+      });
     } else {
-      for (const profile of (profiles ?? []) as Profile[]) profilesById.set(profile.id, profile);
+      for (const profile of profiles ?? []) profileIds.add(profile.id);
     }
   }
 
@@ -57,7 +61,6 @@ export async function GET() {
   async function resolveAuthUsers() {
     while (nextIndex < userIds.length) {
       const userId = userIds[nextIndex++];
-      const profile = profilesById.get(userId);
       const { data, error } = await admin.auth.admin.getUserById(userId);
       if (error) {
         console.error("[admin/athletes/identities] falha ao consultar usuário de autenticação", { code: error.status });
@@ -65,10 +68,9 @@ export async function GET() {
 
       const authUser = data.user;
       const email = authUser?.email ?? null;
-      const name = profile?.full_name?.trim() ||
-        (authUser ? metadataName(authUser.user_metadata) : null) ||
+      const name = (authUser ? metadataName(authUser.user_metadata) : null) ||
         email?.split("@")[0] ||
-        `Atleta ${userId.slice(0, 8)}`;
+        (profileIds.has(userId) ? "Atleta" : `Atleta ${userId.slice(0, 8)}`);
       identities[userId] = { name, email };
     }
   }
