@@ -117,7 +117,10 @@ export async function PATCH(request: Request) {
     userDb = createUserDataClient(session.access_token);
   } catch (error) {
     console.error("[athlete/status] cliente autenticado indisponível", error);
-    return NextResponse.json({ error: "A alteração de status não está disponível no servidor." }, { status: 503 });
+    return NextResponse.json(
+      { error: "A configuração NEXT_PUBLIC_SUPABASE_URL/NEXT_PUBLIC_SUPABASE_ANON_KEY não está disponível no servidor." },
+      { status: 503 },
+    );
   }
 
   const { data: athlete, error: athleteError } = await userDb
@@ -137,8 +140,25 @@ export async function PATCH(request: Request) {
     }
   }
 
-  const { error } = await userDb.from("athletes").update({ status }).eq("id", athlete.id);
-  if (error) return NextResponse.json({ error: "Não foi possível atualizar o status do jogador." }, { status: 500 });
+  const { data: updatedAthlete, error } = await userDb
+    .from("athletes")
+    .update({ status })
+    .eq("id", athlete.id)
+    .select("id")
+    .maybeSingle();
+  if (error) {
+    console.error("[athlete/status] falha ao atualizar status do próprio atleta", {
+      code: error.code,
+      message: error.message,
+    });
+    return NextResponse.json({ error: "O banco recusou a alteração de status do atleta." }, { status: 500 });
+  }
+  if (!updatedAthlete) {
+    return NextResponse.json(
+      { error: "O banco não permitiu atualizar este atleta. Verifique a política RLS de athletes para o próprio usuário." },
+      { status: 403 },
+    );
+  }
   return NextResponse.json({ status });
 }
 
