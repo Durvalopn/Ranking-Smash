@@ -14,8 +14,10 @@ const statusLabels: Record<AthleteStatus, string> = {
   pendente: "Pendente",
 };
 
-type Athlete = Pick<Database["public"]["Tables"]["athletes"]["Row"], "id" | "user_id" | "current_class" | "status">;
-type Identity = { name: string; email: string | null };
+type Athlete = Pick<Database["public"]["Tables"]["athletes"]["Row"], "id" | "user_id" | "current_class" | "status"> & {
+  name: string;
+  email: string | null;
+};
 type Season = Pick<Database["public"]["Tables"]["seasons"]["Row"], "id" | "name" | "year" | "status">;
 type Round = Pick<Database["public"]["Tables"]["rounds"]["Row"], "id" | "season_id" | "round_number" | "status">;
 type Match = Pick<Database["public"]["Tables"]["matches"]["Row"], "round_id" | "athlete_one_id" | "athlete_two_id">;
@@ -24,18 +26,10 @@ function classLabel(classNumber: number) {
   return classNumber === 7 ? "Feminino" : `${classNumber}ª Classe`;
 }
 
-function safeErrorMessage(value: string | null) {
-  return value
-    ?.replace(/\beyJ[\w-]+\.[\w-]+\.[\w-]+\b/g, "[redigido]")
-    .replace(/\b(sb_secret_|sb_publishable_)[\w-]+/g, "[redigido]")
-    .replace(/\b(authorization|api[_-]?key|service[_-]?role|secret|access_token|refresh_token)([ "'=:]+)(?:bearer\s+)?[^\s,"']+/gi, "$1$2[redigido]");
-}
-
 export default function AdminPlayersPage() {
   const [authorized, setAuthorized] = useState(false);
   const [loading, setLoading] = useState(true);
   const [athletes, setAthletes] = useState<Athlete[]>([]);
-  const [identities, setIdentities] = useState<Record<string, Identity>>({});
   const [currentSeason, setCurrentSeason] = useState<Season | null>(null);
   const [currentRound, setCurrentRound] = useState<Round | null>(null);
   const [matches, setMatches] = useState<Match[]>([]);
@@ -59,54 +53,31 @@ export default function AdminPlayersPage() {
       return;
     }
 
-    const athleteQuery = await supabase
-      .from("athletes")
-      .select("id,user_id,current_class,status")
-      .order("current_class");
-
-    if (athleteQuery.error) {
-      console.error("[admin/jogadores] falha ao carregar atletas", {
-        code: athleteQuery.error.code,
-        message: safeErrorMessage(athleteQuery.error.message),
-        details: safeErrorMessage(athleteQuery.error.details),
-        hint: safeErrorMessage(athleteQuery.error.hint),
-      });
+    let athleteResponse: Response;
+    try {
+      athleteResponse = await fetch("/api/admin/athletes/identities", { cache: "no-store" });
+    } catch {
+      console.error("[admin/jogadores] falha de rede ao carregar atletas");
       setAthleteLoadError(true);
       setLoading(false);
       return;
     }
-    setAthletes((athleteQuery.data ?? []) as Athlete[]);
-
-    const [profileQuery, seasonQuery] = await Promise.all([
-      supabase.from("profiles").select("id"),
-      supabase
-        .from("seasons")
-        .select("id,name,year,status,season_type,created_at")
-        .neq("season_type", "finals")
-        .in("status", ["active", "registration"])
-        .order("created_at", { ascending: false }),
-    ]);
-
-    if (profileQuery.error) {
-      console.error("[admin/jogadores] falha ao carregar perfis", {
-        code: profileQuery.error.code,
-        message: safeErrorMessage(profileQuery.error.message),
-        details: safeErrorMessage(profileQuery.error.details),
-        hint: safeErrorMessage(profileQuery.error.hint),
-      });
+    if (!athleteResponse.ok) {
+      console.error("[admin/jogadores] falha ao carregar atletas", { status: athleteResponse.status });
+      setAthleteLoadError(true);
+      setLoading(false);
+      return;
     }
+    const athleteResult = await athleteResponse.json() as { athletes?: Athlete[] };
+    const loadedAthletes = athleteResult.athletes ?? [];
+    setAthletes(loadedAthletes);
 
-    try {
-      const identityResponse = await fetch("/api/admin/athletes/identities", { cache: "no-store" });
-      if (identityResponse.ok) {
-        const result = await identityResponse.json() as { identities?: Record<string, Identity> };
-        setIdentities(result.identities ?? {});
-      } else {
-        console.error("[admin/jogadores] falha ao carregar identificações administrativas", { status: identityResponse.status });
-      }
-    } catch {
-      console.error("[admin/jogadores] falha de rede ao carregar identificações administrativas");
-    }
+    const seasonQuery = await supabase
+      .from("seasons")
+      .select("id,name,year,status,season_type,created_at")
+      .neq("season_type", "finals")
+      .in("status", ["active", "registration"])
+      .order("created_at", { ascending: false });
 
     if (seasonQuery.error) {
       console.error("[admin/jogadores] falha ao consultar temporadas", { code: seasonQuery.error.code });
@@ -167,8 +138,8 @@ export default function AdminPlayersPage() {
     classNumber,
     athletes: athletes
       .filter((athlete) => athlete.current_class === classNumber)
-      .sort((left, right) => (identities[left.user_id]?.name ?? "").localeCompare(identities[right.user_id]?.name ?? "")),
-  })), [athletes, identities]);
+      .sort((left, right) => left.name.localeCompare(right.name)),
+  })), [athletes]);
 
   async function changeStatus(athleteId: string, status: Athlete["status"]) {
     setSavingId(athleteId);
@@ -246,7 +217,6 @@ export default function AdminPlayersPage() {
                         </thead>
                         <tbody>
                           {classAthletes.map((athlete) => {
-                            const identity = identities[athlete.user_id];
                             const participates = participants.has(athlete.id);
                             const participationLabel = matchesLoadError
                               ? "Indisponível"
@@ -255,8 +225,8 @@ export default function AdminPlayersPage() {
                                 : "Sem rodada vigente";
                             return (
                               <tr key={athlete.id} className="border-t border-slate-800 text-slate-300">
-                                <td className="py-3 pr-4 font-medium text-white">{identity?.name || `Atleta ${athlete.user_id.slice(0, 8)}`}</td>
-                                <td className="py-3 pr-4">{identity?.email || "E-mail indisponível"}</td>
+                                <td className="py-3 pr-4 font-medium text-white">{athlete.name}</td>
+                                <td className="py-3 pr-4">{athlete.email || "E-mail indisponível"}</td>
                                 <td className="py-3 pr-4">
                                   <select
                                     value={athlete.status}

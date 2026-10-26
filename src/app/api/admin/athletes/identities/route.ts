@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import type { Database } from "@/types/database";
 
 const ADMIN_EMAIL = "eng.durvalneto@gmail.com";
 const AUTH_LOOKUP_CONCURRENCY = 8;
 
-type Athlete = { user_id: string };
+type Athlete = Pick<Database["public"]["Tables"]["athletes"]["Row"], "id" | "user_id" | "current_class" | "status">;
+type Profile = Pick<Database["public"]["Tables"]["profiles"]["Row"], "id" | "full_name">;
 
 function metadataName(metadata: Record<string, unknown>) {
   for (const key of ["full_name", "name", "display_name"]) {
@@ -31,18 +33,27 @@ export async function GET() {
     return NextResponse.json({ error: "Consulta administrativa indisponível." }, { status: 503 });
   }
 
-  const { data: athletes, error: athleteError } = await admin.from("athletes").select("user_id");
+  const { data: athletes, error: athleteError } = await admin
+    .from("athletes")
+    .select("id,user_id,current_class,status")
+    .order("current_class");
   if (athleteError) {
-    console.error("[admin/athletes/identities] falha ao consultar atletas", { code: athleteError.code });
+    console.error("[admin/athletes/identities] falha ao consultar atletas", {
+      code: athleteError.code,
+      message: athleteError.message,
+      details: athleteError.details,
+      hint: athleteError.hint,
+    });
     return NextResponse.json({ error: "Não foi possível consultar identificações." }, { status: 500 });
   }
 
-  const userIds = [...new Set(((athletes ?? []) as Athlete[]).map((athlete) => athlete.user_id))];
-  const profileIds = new Set<string>();
+  const athleteRows = (athletes ?? []) as Athlete[];
+  const userIds = [...new Set(athleteRows.map((athlete) => athlete.user_id))];
+  const profileNames = new Map<string, string>();
   if (userIds.length > 0) {
     const { data: profiles, error: profileError } = await admin
       .from("profiles")
-      .select("id")
+      .select("id,full_name")
       .in("id", userIds);
     if (profileError) {
       console.error("[admin/athletes/identities] falha ao consultar perfis", {
@@ -52,7 +63,9 @@ export async function GET() {
         hint: profileError.hint,
       });
     } else {
-      for (const profile of profiles ?? []) profileIds.add(profile.id);
+      for (const profile of (profiles ?? []) as Profile[]) {
+        if (profile.full_name?.trim()) profileNames.set(profile.id, profile.full_name.trim());
+      }
     }
   }
 
@@ -61,17 +74,35 @@ export async function GET() {
   async function resolveAuthUsers() {
     while (nextIndex < userIds.length) {
       const userId = userIds[nextIndex++];
-      const { data, error } = await admin.auth.admin.getUserById(userId);
-      if (error) {
-        console.error("[admin/athletes/identities] falha ao consultar usuário de autenticação", { code: error.status });
+      let email: string | null = null;
+      try {
+        const { data, error } = await admin.auth.admin.getUserById(userId);
+        if (error) {
+          console.error("[admin/athletes/identities] falha ao consultar usuário de autenticação", {
+            status: error.status,
+            message: error.message,
+          });
+        } else {
+          email = data.user.email ?? null;
+          identities[userId] = {
+            name: profileNames.get(userId) ||
+              metadataName(data.user.user_metadata) ||
+              email?.split("@")[0] ||
+              `Atleta ${userId.slice(0, 8)}`,
+            email,
+          };
+        }
+      } catch (error) {
+        console.error("[admin/athletes/identities] falha ao consultar usuário de autenticação", {
+          message: error instanceof Error ? error.message : "Erro desconhecido",
+        });
       }
-
-      const authUser = data.user;
-      const email = authUser?.email ?? null;
-      const name = (authUser ? metadataName(authUser.user_metadata) : null) ||
-        email?.split("@")[0] ||
-        (profileIds.has(userId) ? "Atleta" : `Atleta ${userId.slice(0, 8)}`);
-      identities[userId] = { name, email };
+      if (!identities[userId]) {
+        identities[userId] = {
+          name: profileNames.get(userId) || `Atleta ${userId.slice(0, 8)}`,
+          email,
+        };
+      }
     }
   }
 
@@ -79,5 +110,12 @@ export async function GET() {
     Array.from({ length: Math.min(AUTH_LOOKUP_CONCURRENCY, userIds.length) }, () => resolveAuthUsers()),
   );
 
-  return NextResponse.json({ identities }, { headers: { "Cache-Control": "no-store" } });
+  const responseAthletes = athleteRows.map((athlete) => ({
+    ...athlete,
+    ...identities[athlete.user_id],
+  }));
+  return NextResponse.json(
+    { athletes: responseAthletes },
+    { headers: { "Cache-Control": "no-store, private" } },
+  );
 }
