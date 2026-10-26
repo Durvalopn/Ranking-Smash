@@ -17,6 +17,7 @@
     "lint:fix": "next lint --fix",
     "type-check": "tsc --noEmit",
     "check": "npm run type-check && npm run lint && npm run build",
+    "seed:feminino": "node scripts/seed-feminino.mjs",
     "clean": "node -e \"const fs=require('fs');['.next','out','coverage'].forEach((dir)=>fs.rmSync(dir,{recursive:true,force:true}))\""
   },
   "dependencies": {
