@@ -6,7 +6,10 @@ import type { Database } from "@/types/database";
 const ADMIN_EMAIL = "eng.durvalneto@gmail.com";
 const AUTH_LOOKUP_CONCURRENCY = 8;
 
-type Athlete = Pick<Database["public"]["Tables"]["athletes"]["Row"], "id" | "user_id" | "current_class" | "status">;
+type Athlete = Omit<
+  Pick<Database["public"]["Tables"]["athletes"]["Row"], "id" | "user_id" | "current_class" | "status">,
+  "status"
+> & { status: string };
 type Profile = Pick<Database["public"]["Tables"]["profiles"]["Row"], "id" | "full_name">;
 
 function metadataName(metadata: Record<string, unknown>) {
@@ -112,6 +115,7 @@ export async function GET() {
 
   const responseAthletes = athleteRows.map((athlete) => ({
     ...athlete,
+    status: athlete.status === "ativo" ? "active" : athlete.status,
     ...identities[athlete.user_id],
   }));
   return NextResponse.json(
