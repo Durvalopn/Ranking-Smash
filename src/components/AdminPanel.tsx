@@ -89,6 +89,7 @@ export default function AdminPanel({
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const reconciledRounds = useRef(new Set<string>());
+  const automaticSeasonActions = useRef(new Set<string>());
 
   const season = seasons.find((item) => item.id === seasonId);
   const seasonRounds = useMemo(
@@ -155,6 +156,89 @@ export default function AdminPanel({
     }
   }
 
+  async function finalizeSeasonAutomatically(targetSeason: AdminSeason) {
+    if (automaticSeasonActions.current.has(targetSeason.id)) return false;
+    automaticSeasonActions.current.add(targetSeason.id);
+    let completed = false;
+    try {
+      const { data: seasonState, error: seasonQueryError } = await db
+        .from("seasons")
+        .select("id,status,rounds_count,class_movement_applied_at")
+        .eq("id", targetSeason.id)
+        .single();
+      if (seasonQueryError) throw new Error(`Não foi possível verificar a temporada: ${seasonQueryError.message}`);
+
+      const requiredRounds = seasonState.rounds_count ?? 0;
+      if (requiredRounds < 1) return false;
+
+      const { data: roundRows, error: roundsError } = await db
+        .from("rounds")
+        .select("id,round_number,status")
+        .eq("season_id", targetSeason.id);
+      if (roundsError) throw new Error(`Não foi possível verificar as rodadas da temporada: ${roundsError.message}`);
+      if (
+        !roundRows ||
+        roundRows.length !== requiredRounds ||
+        roundRows.some((round: { round_number: number; status: string }) =>
+          round.round_number > requiredRounds || !["closed", "finished"].includes(round.status),
+        )
+      ) {
+        return false;
+      }
+
+      const { data: roundMatches, error: matchesError } = await db
+        .from("matches")
+        .select("id,status")
+        .eq("season_id", targetSeason.id);
+      if (matchesError) throw new Error(`Não foi possível verificar as partidas da temporada: ${matchesError.message}`);
+      const pendingMatches = (roundMatches ?? []).filter(
+        (match: { id: string; status: string }) =>
+          !["completed", "confirmed", "result_submitted", "walkover"].includes(match.status),
+      );
+      if (pendingMatches.length) return false;
+
+      if (seasonState.status !== "finished") {
+        const { data: finishedSeason, error: finishError } = await db
+          .from("seasons")
+          .update({ status: "finished" })
+          .eq("id", targetSeason.id)
+          .in("status", ["active", "closed"])
+          .select("id")
+          .maybeSingle();
+        if (finishError) throw new Error(`Não foi possível finalizar a temporada: ${finishError.message}`);
+        if (!finishedSeason) throw new Error("A temporada mudou de estado antes da finalização automática.");
+      }
+
+      if (seasonState.class_movement_applied_at) {
+        completed = true;
+        return true;
+      }
+
+      const { error: movementError } = await db.rpc("apply_season_class_movements", {
+        p_season_id: targetSeason.id,
+      });
+      if (movementError) {
+        throw new Error(`A temporada foi finalizada, mas não foi possível aplicar a movimentação automática: ${movementError.message}`);
+      }
+
+      const { data: updatedState, error: verifyError } = await db
+        .from("seasons")
+        .select("class_movement_applied_at")
+        .eq("id", targetSeason.id)
+        .single();
+      if (verifyError) throw new Error(`Não foi possível confirmar a movimentação de classes: ${verifyError.message}`);
+      if (!updatedState.class_movement_applied_at) {
+        throw new Error("A movimentação foi solicitada, mas o banco não confirmou a atualização das classes.");
+      }
+      completed = true;
+      return true;
+    } catch (automaticError) {
+      throw automaticError;
+    } finally {
+      if (!completed) automaticSeasonActions.current.delete(targetSeason.id);
+    }
+  }
+
   useEffect(() => {
     if (!season) return;
     const closedRounds = seasonRounds.filter((round) => ["closed", "finished"].includes(round.status));
@@ -177,6 +261,16 @@ export default function AdminPanel({
     })().catch((reconciliationError) => {
       setError(reconciliationError instanceof Error ? reconciliationError.message : "Não foi possível reconciliar os pontos dos licenciados.");
     });
+  }, [season, seasonRounds]);
+
+  useEffect(() => {
+    if (!season || !seasonRounds.length) return;
+    if (!seasonRounds.every((round) => ["closed", "finished"].includes(round.status))) return;
+    void finalizeSeasonAutomatically(season)
+      .then((completed) => completed ? onRefresh?.() : undefined)
+      .catch((automaticError) => {
+        setError(automaticError instanceof Error ? automaticError.message : "Não foi possível finalizar a temporada automaticamente.");
+      });
   }, [season, seasonRounds]);
 
   async function generateRound() {
@@ -411,7 +505,13 @@ export default function AdminPanel({
       if (standingsError) {
         setError(`Rodada ${current.number} encerrada, mas não foi possível atualizar a classificação: ${standingsError.message}`);
       } else {
-        setMessage(`Rodada ${current.number} encerrada com sucesso.`);
+        const finalized = await finalizeSeasonAutomatically(season);
+        const isFinalRound = current.number >= roundLimit;
+        setMessage(
+          isFinalRound && finalized
+            ? `Rodada ${current.number} encerrada. Temporada finalizada e movimentação de classes aplicada automaticamente.`
+            : `Rodada ${current.number} encerrada com sucesso.`,
+        );
       }
       await onRefresh?.();
     } catch (closeError) {
