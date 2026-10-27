@@ -38,13 +38,13 @@ async function hasFirstRoundBeenDrawn(db: StatusClient) {
 
   const { data: round, error: roundError } = await db
     .from("rounds")
-    .select("id,status,drawn_at")
+    .select("id,status")
     .eq("season_id", season.id)
     .eq("round_number", 1)
     .maybeSingle();
   if (roundError) throw new Error("Não foi possível verificar o sorteio da primeira rodada.");
   if (!round) return false;
-  if (round.drawn_at || round.status === "drawn") return true;
+  if (round.status === "drawn") return true;
 
   const { count, error: matchError } = await db
     .from("matches")
@@ -166,6 +166,16 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: "Jogador não encontrado." }, { status: 404 });
     }
 
+    if (status === "pendente") {
+      try {
+        if (await hasFirstRoundBeenDrawn(db)) {
+          return NextResponse.json({ error: "Pendente só pode ser definido antes do sorteio da primeira rodada." }, { status: 409 });
+        }
+      } catch (error) {
+        return NextResponse.json({ error: error instanceof Error ? error.message : "Não foi possível validar o status." }, { status: 503 });
+      }
+    }
+
     const { error } = await db.from("athletes").update({ status }).eq("id", athlete.id);
     if (error) {
       return NextResponse.json({ error: "Não foi possível atualizar o status do jogador." }, { status: 500 });
@@ -202,10 +212,11 @@ export async function PATCH(request: Request) {
     .maybeSingle();
   if (athleteError || !athlete) return NextResponse.json({ error: "Jogador não encontrado." }, { status: 404 });
 
-  if (!admin && status === "pendente") {
+  if (status === "pendente") {
     try {
-      if (await hasFirstRoundBeenDrawn(userDb)) {
-        return NextResponse.json({ error: "Pendente só pode ser escolhido antes do sorteio da primeira rodada." }, { status: 409 });
+      const statusDb = admin ? createAdminClient() : userDb;
+      if (await hasFirstRoundBeenDrawn(statusDb)) {
+        return NextResponse.json({ error: "Pendente só pode ser definido antes do sorteio da primeira rodada." }, { status: 409 });
       }
     } catch (error) {
       return NextResponse.json({ error: error instanceof Error ? error.message : "Não foi possível validar o status." }, { status: 503 });
@@ -249,8 +260,12 @@ export async function GET() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Faça login para consultar seu status." }, { status: 401 });
-  if (isAdmin(user)) return NextResponse.json({ canChoosePending: true });
   try {
+    if (isAdmin(user)) {
+      const adminDb = createAdminClient();
+      const canChoosePending = !(await hasFirstRoundBeenDrawn(adminDb));
+      return NextResponse.json({ canChoosePending });
+    }
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.access_token) {
       return NextResponse.json({ error: "Sua sessão expirou. Entre novamente." }, { status: 401 });

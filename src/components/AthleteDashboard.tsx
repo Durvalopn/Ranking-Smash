@@ -36,7 +36,7 @@ export default function AthleteDashboard({
   matches,
 }: Props) {
   const [status, setStatus] = useState(athleteStatus);
-  const [canChoosePending, setCanChoosePending] = useState(true);
+  const [canChoosePending, setCanChoosePending] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
