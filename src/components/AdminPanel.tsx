@@ -536,7 +536,10 @@ export default function AdminPanel({
           <h2 className="mt-2 text-2xl font-bold text-white">Rodadas e sorteios</h2>
           <p className="mt-2 text-slate-400">Gere rodadas, lance resultados e acompanhe os movimentos automáticos de classe.</p>
         </div>
-        <Link href="/classificacao" className="text-sm font-semibold text-emerald-300">Ver classificação</Link>
+        <div className="flex items-center gap-4">
+          <Link href="/admin/resultados" className="text-sm font-semibold text-amber-200">Corrigir resultados</Link>
+          <Link href="/classificacao" className="text-sm font-semibold text-emerald-300">Ver classificação</Link>
+        </div>
       </div>
 
       <div className="mt-5 flex flex-wrap gap-2">
