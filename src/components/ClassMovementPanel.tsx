@@ -10,7 +10,6 @@ type Round = { id: string; season_id: string; round_number: number; status: stri
 type Match = { season_id: string; round_id: string; athlete_one_id: string; athlete_two_id: string | null; status: string; result_type: string | null; athlete_one_points: number | null; athlete_two_points: number | null; athlete_one_sets: number | null; athlete_two_sets: number | null; athlete_one_games: number | null; athlete_two_games: number | null };
 type MatchEvent = { season_id: string; round_id: string; athlete_id: string; event_type: string; points: number };
 type Decision = { athleteId: string; name: string; fromClass: number; toClass: number; movementStatus: "promoted" | "relegated"; position: number; points: number };
-type MovementRecord = { season_id: string; athlete_id: string; from_class: number; to_class: number; movement_status: "promoted" | "relegated"; final_position: number; points: number; applied_by: string | null };
 type QueryTable = any;
 
 const completedStatuses = ["result_submitted", "completed", "confirmed", "walkover"];
@@ -27,8 +26,6 @@ export default function ClassMovementPanel() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [selectedSeasonId, setSelectedSeasonId] = useState("");
   const [loading, setLoading] = useState(true);
-  const [applying, setApplying] = useState(false);
-  const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
@@ -112,27 +109,6 @@ export default function ClassMovementPanel() {
     closed: rounds.filter((round) => round.status === "closed").length,
   }), [athletes, matches, rounds]);
 
-  async function applyMovement() {
-    if (!selectedSeason || !pendingMovement) return;
-    setApplying(true); setMessage(""); setError("");
-    const { data: auth } = await supabase.auth.getUser();
-    const appliedBy = auth.user?.id ?? null;
-    const records: MovementRecord[] = decisions.map((decision) => ({ season_id: selectedSeason.id, athlete_id: decision.athleteId, from_class: decision.fromClass, to_class: decision.toClass, movement_status: decision.movementStatus, final_position: decision.position, points: decision.points, applied_by: appliedBy }));
-    const movementTable: QueryTable = supabase.from("season_class_movements");
-    const movementResult = records.length ? await movementTable.upsert(records, { onConflict: "season_id,athlete_id" }) : { error: null };
-    if (movementResult.error) { setError("Não foi possível registrar as trocas de classes."); setApplying(false); return; }
-    const athleteTable: QueryTable = supabase.from("athletes");
-    const updates = await Promise.all(decisions.map((decision) => athleteTable.update({ current_class: decision.toClass }).eq("id", decision.athleteId)));
-    const updateError = updates.find((result: any) => result.error)?.error;
-    if (updateError) { setError("Os registros foram calculados, mas não foi possível concluir todas as alterações de classe."); setApplying(false); return; }
-    const seasonTable: QueryTable = supabase.from("seasons");
-    const seasonResult = await seasonTable.update({ class_movement_applied_at: new Date().toISOString(), class_movement_applied_by: appliedBy }).eq("id", selectedSeason.id);
-    if (seasonResult.error) { setError("As classes foram atualizadas, mas não foi possível marcar a etapa como concluída."); setApplying(false); return; }
-    setMessage("Trocas de classes aplicadas. A criação da próxima temporada está liberada.");
-    setApplying(false);
-    await load();
-  }
-
   return <section className="mt-8 rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
     <div className="flex flex-wrap gap-2 border-b border-slate-800 pb-4">
       <button onClick={() => setTab("rounds")} className={`rounded-lg px-4 py-2 text-sm ${tab === "rounds" ? "bg-emerald-500 text-slate-950" : "bg-slate-800 text-slate-300"}`}>Atualização por rodada</button>
@@ -145,12 +121,11 @@ export default function ClassMovementPanel() {
         <div className="rounded-xl bg-slate-950/60 p-4"><p className="text-xs text-slate-400">Partidas abertas</p><strong className="text-2xl text-white">{metrics.pending}</strong></div>
         <div className="rounded-xl bg-slate-950/60 p-4"><p className="text-xs text-slate-400">Rodadas encerradas</p><strong className="text-2xl text-white">{metrics.closed}</strong></div>
       </div>
-      <div className="mt-5 space-y-2">{seasons.map((season) => <div key={season.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-800 p-4"><div><strong className="text-white">{season.name} {season.year}</strong><p className="text-sm text-slate-400">{rounds.filter((round) => round.season_id === season.id && round.status === "closed").length} rodada(s) encerrada(s) · {season.status}</p></div><span className={`rounded-full px-3 py-1 text-xs ${season.status === "finished" ? "bg-emerald-500/20 text-emerald-300" : "bg-amber-500/20 text-amber-200"}`}>{season.class_movement_applied_at ? "Classes atualizadas" : season.status === "finished" ? "Troca obrigatória pendente" : "Em andamento"}</span></div>)}</div>
+      <div className="mt-5 space-y-2">{seasons.map((season) => <div key={season.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-800 p-4"><div><strong className="text-white">{season.name} {season.year}</strong><p className="text-sm text-slate-400">{rounds.filter((round) => round.season_id === season.id && round.status === "closed").length} rodada(s) encerrada(s) · {season.status}</p></div><span className={`rounded-full px-3 py-1 text-xs ${season.status === "finished" ? "bg-emerald-500/20 text-emerald-300" : "bg-amber-500/20 text-amber-200"}`}>{season.class_movement_applied_at ? "Classes atualizadas" : season.status === "finished" ? "Movimentação automática pendente" : "Em andamento"}</span></div>)}</div>
     </div> : <div className="pt-5">
-      <div className="flex flex-wrap items-end justify-between gap-4"><div><h3 className="text-xl font-semibold text-white">Troca de classes obrigatória</h3><p className="mt-1 text-sm text-slate-400">Conclua esta etapa antes de gerar uma nova temporada.</p></div><select value={selectedSeasonId} onChange={(event) => setSelectedSeasonId(event.target.value)} className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white">{seasons.filter((item) => item.status === "finished").map((item) => <option key={item.id} value={item.id}>{item.name} {item.year}</option>)}</select></div>
+      <div className="flex flex-wrap items-end justify-between gap-4"><div><h3 className="text-xl font-semibold text-white">Prévia da movimentação automática</h3><p className="mt-1 text-sm text-slate-400">Acompanhe o acesso e rebaixamento calculados para cada temporada finalizada.</p></div><select value={selectedSeasonId} onChange={(event) => setSelectedSeasonId(event.target.value)} className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white">{seasons.filter((item) => item.status === "finished").map((item) => <option key={item.id} value={item.id}>{item.name} {item.year}</option>)}</select></div>
       {selectedSeason && !pendingMovement && <p className="mt-5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-emerald-200">A troca de classes desta temporada já foi concluída.</p>}
-      {pendingMovement && <><div className="mt-5 grid gap-3 md:grid-cols-2">{(["promoted", "relegated"] as const).map((kind) => <div key={kind} className="rounded-xl border border-slate-800 bg-slate-950/50 p-4"><h4 className={`font-semibold ${kind === "promoted" ? "text-emerald-300" : "text-red-300"}`}>{kind === "promoted" ? "Acesso" : "Rebaixamento"}</h4>{decisions.filter((decision) => decision.movementStatus === kind).length ? <ul className="mt-2 space-y-1 text-sm text-slate-300">{decisions.filter((decision) => decision.movementStatus === kind).map((decision) => <li key={decision.athleteId}>{decision.name}: {className(decision.fromClass)} → {className(decision.toClass)}</li>)}</ul> : <p className="mt-2 text-sm text-slate-500">Nenhum atleta</p>}</div>)}</div><button disabled={applying} onClick={applyMovement} className="mt-5 rounded-lg bg-emerald-500 px-5 py-3 font-semibold text-slate-950 disabled:opacity-50">{applying ? "Aplicando..." : "Aplicar trocas e liberar próxima temporada"}</button></>}
-      {message && <p className="mt-4 text-emerald-300">{message}</p>}
+      {pendingMovement && <div className="mt-5 grid gap-3 md:grid-cols-2">{(["promoted", "relegated"] as const).map((kind) => <div key={kind} className="rounded-xl border border-slate-800 bg-slate-950/50 p-4"><h4 className={`font-semibold ${kind === "promoted" ? "text-emerald-300" : "text-red-300"}`}>{kind === "promoted" ? "Acesso" : "Rebaixamento"}</h4>{decisions.filter((decision) => decision.movementStatus === kind).length ? <ul className="mt-2 space-y-1 text-sm text-slate-300">{decisions.filter((decision) => decision.movementStatus === kind).map((decision) => <li key={decision.athleteId}>{decision.name}: {className(decision.fromClass)} → {className(decision.toClass)}</li>)}</ul> : <p className="mt-2 text-sm text-slate-500">Nenhum atleta</p>}</div>)}</div>}
     </div>}
   </section>;
 }
