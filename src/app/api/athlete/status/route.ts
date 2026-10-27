@@ -185,10 +185,6 @@ export async function PATCH(request: Request) {
         await recordLicensedPointsForOpenRounds(athlete.id);
       } catch (creditError) {
         console.error("[athlete/status] status atualizado, mas não foi possível registrar os pontos de licenciamento", creditError);
-        return NextResponse.json(
-          { error: "Status atualizado, mas os 3 pontos não foram registrados. Tente novamente ou confira a classificação." },
-          { status: 500 },
-        );
       }
     }
     return NextResponse.json({ status });
@@ -247,10 +243,6 @@ export async function PATCH(request: Request) {
       await recordLicensedPointsForOpenRounds(athlete.id);
     } catch (creditError) {
       console.error("[athlete/status] status atualizado, mas não foi possível registrar os pontos de licenciamento", creditError);
-      return NextResponse.json(
-        { error: "Status atualizado, mas os 3 pontos não foram registrados. Tente novamente ou confira a classificação." },
-        { status: 500 },
-      );
     }
   }
   return NextResponse.json({ status });
