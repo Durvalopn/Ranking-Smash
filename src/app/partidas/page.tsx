@@ -48,7 +48,49 @@ function MatchCard({match,names}:{match:Match;names:Record<string,string>}){
 export default function PartidasPage(){
  const supabase=createClient();
  const[seasons,setSeasons]=useState<Season[]>([]),[rounds,setRounds]=useState<Round[]>([]),[matches,setMatches]=useState<Match[]>([]),[names,setNames]=useState<Record<string,string>>({}),[seasonFilter,setSeasonFilter]=useState("all"),[loading,setLoading]=useState(true),[error,setError]=useState("");
- useEffect(()=>{let mounted=true;async function load(){setLoading(true);setError("");const[seasonQuery,roundQuery,matchQuery]=await Promise.all([supabase.from("seasons").select("id,name,year,status,season_type,created_at").order("created_at",{ascending:true}),supabase.from("rounds").select("id,season_id,round_number,name,status").order("round_number",{ascending:true}),supabase.from("matches").select("id,season_id,round_id,class_number,athlete_one_id,athlete_two_id,status,result_type,athlete_one_sets,athlete_two_sets,athlete_one_games,athlete_two_games,athlete_one_points,athlete_two_points,winner_athlete_id,draw_order").order("draw_order",{ascending:true})]);if(!mounted)return;if(seasonQuery.error||roundQuery.error||matchQuery.error){setError("Não foi possível carregar as partidas.");setLoading(false);return}const loadedMatches=(matchQuery.data??[])as Match[];const ids=[...new Set(loadedMatches.flatMap(m=>[m.athlete_one_id,m.athlete_two_id].filter(Boolean)))];let map:Record<string,string>={};if(ids.length){const athletes=await supabase.from("athletes").select("id,user_id").in("id",ids);const userIds=(athletes.data??[]).map((a:Athlete)=>a.user_id);const profiles=userIds.length?await supabase.from("profiles").select("id,full_name").in("id",userIds):{data:[]};const profileMap=Object.fromEntries(((profiles.data??[])as Profile[]).map(p=>[p.id,p.full_name??"Atleta"]));for(const athlete of (athletes.data??[])as Athlete[])map[athlete.id]=profileMap[athlete.user_id]??"Atleta"}setSeasons((seasonQuery.data??[])as Season[]);setRounds((roundQuery.data??[])as Round[]);setMatches(loadedMatches);setNames(map);setLoading(false)}void load();return()=>{mounted=false}},[supabase]);
+ useEffect(()=>{
+  let mounted=true;
+  async function load(){
+   setLoading(true);
+   setError("");
+   const[seasonQuery,roundQuery]=await Promise.all([
+    supabase.from("seasons").select("id,name,year,status,season_type,created_at").order("created_at",{ascending:true}),
+    supabase.from("rounds").select("id,season_id,round_number,name,status").order("round_number",{ascending:true}),
+   ]);
+   if(!mounted)return;
+   if(seasonQuery.error||roundQuery.error){setError("Não foi possível carregar as partidas.");setLoading(false);return}
+   const loadedMatches:Match[]=[];
+   const pageSize=1000;
+   for(let from=0;;from+=pageSize){
+    const{data,error:matchError}=await supabase.from("matches")
+     .select("id,season_id,round_id,class_number,athlete_one_id,athlete_two_id,status,result_type,athlete_one_sets,athlete_two_sets,athlete_one_games,athlete_two_games,athlete_one_points,athlete_two_points,winner_athlete_id,draw_order")
+     .order("draw_order",{ascending:true})
+    .order("id",{ascending:true})
+     .range(from,from+pageSize-1);
+    if(!mounted)return;
+    if(matchError){setError("Não foi possível carregar as partidas.");setLoading(false);return}
+    loadedMatches.push(...((data??[])as Match[]));
+    if((data??[]).length<pageSize)break;
+   }
+   const ids=[...new Set(loadedMatches.flatMap(m=>[m.athlete_one_id,m.athlete_two_id].filter(Boolean)))];
+   let map:Record<string,string>={};
+   if(ids.length){
+    const athletes=await supabase.from("athletes").select("id,user_id").in("id",ids);
+    const userIds=(athletes.data??[]).map((a:Athlete)=>a.user_id);
+    const profiles=userIds.length?await supabase.from("profiles").select("id,full_name").in("id",userIds):{data:[]};
+    const profileMap=Object.fromEntries(((profiles.data??[])as Profile[]).map(p=>[p.id,p.full_name??"Atleta"]));
+    for(const athlete of (athletes.data??[])as Athlete[])map[athlete.id]=profileMap[athlete.user_id]??"Atleta";
+   }
+   if(!mounted)return;
+   setSeasons((seasonQuery.data??[])as Season[]);
+   setRounds((roundQuery.data??[])as Round[]);
+   setMatches(loadedMatches);
+   setNames(map);
+   setLoading(false);
+  }
+  void load();
+  return()=>{mounted=false};
+ },[supabase]);
  const visibleSeasons=useMemo(()=>seasonFilter==="all"?seasons:seasons.filter(s=>s.id===seasonFilter),[seasonFilter,seasons]);
  const grouped=useMemo<SeasonGroup[]>(()=>visibleSeasons.map(season=>{const seasonRounds=rounds.filter(r=>r.season_id===season.id).map(round=>{const roundMatches=matches.filter(m=>m.round_id===round.id);const groups=classLabels.map((label,index)=>({label,matches:roundMatches.filter(m=>m.class_number===index+1)})).filter(g=>g.matches.length);return{round,groups}}).filter(g=>g.groups.length>0);return{season,rounds:seasonRounds}}).filter(g=>g.rounds.length>0),[visibleSeasons,rounds,matches]);
  const totalMatches=grouped.reduce((sum,s)=>sum+s.rounds.reduce((rTotal,r)=>rTotal+r.groups.reduce((gTotal,g)=>gTotal+g.matches.length,0),0),0);
