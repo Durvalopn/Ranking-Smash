@@ -48,11 +48,27 @@ type Props = {
   onRefresh?: () => Promise<void>;
 };
 
-type DbAthlete = DrawAthlete;
-type DbMatch = ExistingMatch & { id: string; round_id: string; result_type: string | null };
+type DbAthlete = DrawAthlete & { user_id: string };
+type DbMatch = ExistingMatch & {
+  id: string;
+  round_id: string;
+  status: string;
+  result_type: string | null;
+  athlete_one_points: number | null;
+  athlete_two_points: number | null;
+  athlete_one_sets: number | null;
+  athlete_two_sets: number | null;
+  athlete_one_games: number | null;
+  athlete_two_games: number | null;
+};
 type DbRound = { id: string; round_number: number; status: AdminRound["status"] };
 type LicensedAthlete = { id: string };
 type RoundParticipant = { athlete_one_id: string; athlete_two_id: string | null };
+type SeasonClassAssignment = { athlete_id: string; class_number: number };
+type DrawProfile = { id: string; birth_date: string | null };
+type DrawMatchEvent = { round_id: string; athlete_id: string; event_type: string; points: number };
+
+const completedMatchStatuses = new Set(["result_submitted", "completed", "confirmed", "walkover"]);
 
 const statusLabel: Record<string, string> = {
   registration: "Em inscrição",
@@ -292,7 +308,7 @@ export default function AdminPanel({
       const liveRounds = (roundRows ?? []) as DbRound[];
       const { data: existingMatches, error: matchesError } = await db
         .from("matches")
-        .select("id,round_id,athlete_one_id,athlete_two_id,result_type")
+        .select("id,round_id,athlete_one_id,athlete_two_id,result_type,status,athlete_one_points,athlete_two_points,athlete_one_sets,athlete_two_sets,athlete_one_games,athlete_two_games")
         .eq("season_id", season.id);
       if (matchesError) throw new Error(`Não foi possível consultar os confrontos anteriores: ${matchesError.message}`);
 
@@ -308,6 +324,16 @@ export default function AdminPanel({
       if (roundNumber > (season.roundsCount ?? 0)) {
         throw new Error(`A temporada já atingiu o limite de ${season.roundsCount ?? 0} rodadas.`);
       }
+      const isFinalRound = roundNumber === season.roundsCount;
+      if (isFinalRound) {
+        const previousRounds = liveRounds.filter((round) => round.round_number < roundNumber);
+        if (
+          previousRounds.length !== roundNumber - 1 ||
+          previousRounds.some((round) => !["closed", "finished"].includes(round.status))
+        ) {
+          throw new Error("Encerre todas as rodadas anteriores antes de gerar o sorteio decisivo da temporada.");
+        }
+      }
 
       const closedRounds = [...liveRounds]
         .filter((round) => ["closed", "finished"].includes(round.status))
@@ -316,25 +342,76 @@ export default function AdminPanel({
         await recordLicensedPoints(closedRound.id, closedRound.round_number);
       }
 
-      const { data: athleteRows, error: athletesError } = await db
-        .from("athletes")
-        .select("id,current_class,status")
-        .in("status", ["active", "licensed"])
-        .order("id", { ascending: true });
-      if (athletesError) throw new Error(`Não foi possível carregar os atletas: ${athletesError.message}`);
+      const [athleteResult, assignmentResult, profileResult, eventResult] = await Promise.all([
+        db.from("athletes").select("id,user_id,current_class,status").in("status", ["active", "licensed"]).order("id", { ascending: true }),
+        db.from("season_athlete_classes").select("athlete_id,class_number").eq("season_id", season.id),
+        db.from("profiles").select("id,birth_date"),
+        db.from("match_events").select("round_id,athlete_id,event_type,points").eq("season_id", season.id).in("event_type", ["bye", "licensed"]),
+      ]);
+      if (athleteResult.error) throw new Error(`Não foi possível carregar os atletas: ${athleteResult.error.message}`);
+      if (assignmentResult.error) throw new Error(`Não foi possível consultar as classes da temporada: ${assignmentResult.error.message}`);
+      if (profileResult.error) throw new Error(`Não foi possível consultar as datas de nascimento: ${profileResult.error.message}`);
+      if (eventResult.error) throw new Error(`Não foi possível consultar os pontos adicionais: ${eventResult.error.message}`);
 
-      const athletes = (athleteRows ?? []) as DbAthlete[];
-      const activeAthletes = athletes.filter((athlete) => athlete.status === "active");
+      const athletes = (athleteResult.data ?? []) as DbAthlete[];
+      const seasonClassByAthlete = new Map(
+        ((assignmentResult.data ?? []) as SeasonClassAssignment[]).map((assignment) => [assignment.athlete_id, assignment.class_number]),
+      );
+      const birthDateByProfile = new Map(
+        ((profileResult.data ?? []) as DrawProfile[]).map((profile) => [profile.id, profile.birth_date]),
+      );
+      const drawAthletes = athletes.map((athlete) => ({
+        ...athlete,
+        current_class: seasonClassByAthlete.get(athlete.id) ?? athlete.current_class,
+        birth_date: birthDateByProfile.get(athlete.user_id) ?? null,
+        points: 0,
+        set_balance: 0,
+        game_balance: 0,
+      }));
+      const athleteById = new Map(drawAthletes.map((athlete) => [athlete.id, athlete]));
+      const closedRoundIds = new Set(
+        liveRounds.filter((round) => ["closed", "finished"].includes(round.status)).map((round) => round.id),
+      );
+      const standingsThroughRound = roundNumber - 1;
+      const standingsRoundIds = new Set(
+        liveRounds
+          .filter((round) => round.round_number <= standingsThroughRound && ["closed", "finished"].includes(round.status))
+          .map((round) => round.id),
+      );
+      for (const match of allMatches) {
+        if (!standingsRoundIds.has(match.round_id) || !completedMatchStatuses.has(match.status)) continue;
+        const first = athleteById.get(match.athlete_one_id);
+        const second = match.athlete_two_id ? athleteById.get(match.athlete_two_id) : null;
+        if (!first) continue;
+        first.points = (first.points ?? 0) + (match.athlete_one_points ?? 0);
+        first.set_balance = (first.set_balance ?? 0) + (match.athlete_one_sets ?? 0) - (match.athlete_two_sets ?? 0);
+        first.game_balance = (first.game_balance ?? 0) + (match.athlete_one_games ?? 0) - (match.athlete_two_games ?? 0);
+        if (second) {
+          second.points = (second.points ?? 0) + (match.athlete_two_points ?? 0);
+          second.set_balance = (second.set_balance ?? 0) + (match.athlete_two_sets ?? 0) - (match.athlete_one_sets ?? 0);
+          second.game_balance = (second.game_balance ?? 0) + (match.athlete_two_games ?? 0) - (match.athlete_one_games ?? 0);
+        }
+      }
+      for (const event of (eventResult.data ?? []) as DrawMatchEvent[]) {
+        if (!standingsRoundIds.has(event.round_id)) continue;
+        const athlete = athleteById.get(event.athlete_id);
+        if (athlete) athlete.points = (athlete.points ?? 0) + event.points;
+      }
+
+      const activeAthletes = drawAthletes.filter((athlete) => athlete.status === "active");
       if (activeAthletes.length === 0) {
         throw new Error("Não há atletas ativos para sortear nesta temporada.");
       }
 
       const seed = crypto.randomUUID();
-      const draw = buildRoundDraw(activeAthletes, allMatches, seed);
+      const historicalMatches = allMatches.filter(
+        (match) => closedRoundIds.has(match.round_id) && completedMatchStatuses.has(match.status),
+      );
+      const draw = buildRoundDraw(drawAthletes, historicalMatches, seed, { finalRound: isFinalRound });
       if (draw.length === 0) throw new Error("O sorteio não gerou partidas para os atletas ativos.");
 
       const now = new Date().toISOString();
-      const assignments = athletes.map((athlete) => ({
+      const assignments = drawAthletes.map((athlete) => ({
         season_id: season.id,
         athlete_id: athlete.id,
         class_number: athlete.current_class,
