@@ -10,25 +10,6 @@ type Match = {
   athlete_two_id: string | null;
   athlete_one_name?: string;
   athlete_two_name?: string | null;
-  status: string;
-  result_type: string | null;
-  athlete_one_sets: number | null;
-  athlete_two_sets: number | null;
-  athlete_one_games: number | null;
-  athlete_two_games: number | null;
-  athlete_one_points: number | null;
-  athlete_two_points: number | null;
-  winner_athlete_id: string | null;
-  class_number?: number;
-  draw_order?: number | null;
-};
-
-type Standing = {
-  athlete_id: string;
-  position: number | null;
-  points: number;
-  sets_balance: number;
-  games_balance: number;
 };
 
 type Props = {
@@ -41,7 +22,6 @@ type Props = {
   totalRounds?: number;
   roundDeadline?: string | null;
   matches: Match[];
-  standings: Standing[];
 };
 
 export default function AthleteDashboard({
@@ -54,7 +34,6 @@ export default function AthleteDashboard({
   totalRounds = 0,
   roundDeadline = null,
   matches,
-  standings,
 }: Props) {
   const [status, setStatus] = useState(athleteStatus);
   const [canChoosePending, setCanChoosePending] = useState(true);
@@ -225,20 +204,6 @@ export default function AthleteDashboard({
           </section>
         )}
 
-        <section className="mt-8 grid gap-6 lg:grid-cols-2">
-          <div className="rounded-2xl bg-slate-900 p-6">
-            <h2 className="text-xl font-semibold text-white">Meus confrontos</h2>
-            <p className="mt-2 text-slate-400">
-              {matches.length ? `${matches.length} confronto(s) carregado(s).` : "Nenhum confronto encontrado nesta rodada."}
-            </p>
-          </div>
-          <div className="rounded-2xl bg-slate-900 p-6">
-            <h2 className="text-xl font-semibold text-white">Classificação da classe</h2>
-            <p className="mt-2 text-slate-400">
-              {standings.length ? `${standings.length} atleta(s) na classificação.` : "Ainda não há classificação disponível."}
-            </p>
-          </div>
-        </section>
       </div>
     </main>
   );
