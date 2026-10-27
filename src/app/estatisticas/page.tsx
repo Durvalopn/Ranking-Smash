@@ -27,7 +27,7 @@ function addMatch(stat: Stat, match: Match, athleteId: string) {
   stat.gamesLost += first ? match.athlete_two_games ?? 0 : match.athlete_one_games ?? 0;
   if (match.result_type === "walkover") stat.walkovers += 1;
   if (match.result_type === "double_walkover") stat.doubleWalkovers += 1;
-  if (match.result_type !== "double_walkover" && match.winner_athlete_id) {
+  if (!["double_walkover", "bye"].includes(match.result_type ?? "") && match.winner_athlete_id) {
     if (match.winner_athlete_id === athleteId) stat.wins += 1;
     else stat.losses += 1;
   }
