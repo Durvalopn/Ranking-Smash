@@ -8,6 +8,7 @@ type Profile = { id: string; full_name: string | null };
 type Season = { id: string; name: string; year: number; status: string; class_movement_applied_at: string | null };
 type Round = { id: string; season_id: string; round_number: number; status: string };
 type Match = { season_id: string; round_id: string; athlete_one_id: string; athlete_two_id: string | null; status: string; result_type: string | null; athlete_one_points: number | null; athlete_two_points: number | null; athlete_one_sets: number | null; athlete_two_sets: number | null; athlete_one_games: number | null; athlete_two_games: number | null };
+type MatchEvent = { season_id: string; round_id: string; athlete_id: string; event_type: string; points: number };
 type Decision = { athleteId: string; name: string; fromClass: number; toClass: number; movementStatus: "promoted" | "relegated"; position: number; points: number };
 type MovementRecord = { season_id: string; athlete_id: string; from_class: number; to_class: number; movement_status: "promoted" | "relegated"; final_position: number; points: number; applied_by: string | null };
 type QueryTable = any;
@@ -22,6 +23,7 @@ export default function ClassMovementPanel() {
   const [seasons, setSeasons] = useState<Season[]>([]);
   const [rounds, setRounds] = useState<Round[]>([]);
   const [matches, setMatches] = useState<Match[]>([]);
+  const [matchEvents, setMatchEvents] = useState<MatchEvent[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [selectedSeasonId, setSelectedSeasonId] = useState("");
   const [loading, setLoading] = useState(true);
@@ -33,14 +35,15 @@ export default function ClassMovementPanel() {
     setLoading(true);
     setError("");
     const tables: QueryTable = supabase;
-    const [athleteResult, seasonResult, roundResult, matchResult, profileResult] = await Promise.all([
+    const [athleteResult, seasonResult, roundResult, matchResult, profileResult, eventResult] = await Promise.all([
       tables.from("athletes").select("id,user_id,current_class,status"),
       tables.from("seasons").select("id,name,year,status,class_movement_applied_at").order("year", { ascending: false }),
       tables.from("rounds").select("id,season_id,round_number,status"),
       tables.from("matches").select("season_id,round_id,athlete_one_id,athlete_two_id,status,result_type,athlete_one_points,athlete_two_points,athlete_one_sets,athlete_two_sets,athlete_one_games,athlete_two_games"),
       tables.from("profiles").select("id,full_name"),
+      tables.from("match_events").select("season_id,round_id,athlete_id,event_type,points").in("event_type", ["bye", "licensed"]),
     ]);
-    if (athleteResult.error || seasonResult.error || roundResult.error || matchResult.error || profileResult.error) {
+    if (athleteResult.error || seasonResult.error || roundResult.error || matchResult.error || profileResult.error || eventResult.error) {
       setError("Não foi possível atualizar os dados administrativos.");
       setLoading(false);
       return;
@@ -50,6 +53,7 @@ export default function ClassMovementPanel() {
     setSeasons(loadedSeasons);
     setRounds((roundResult.data ?? []) as Round[]);
     setMatches((matchResult.data ?? []) as Match[]);
+    setMatchEvents((eventResult.data ?? []) as MatchEvent[]);
     setProfiles((profileResult.data ?? []) as Profile[]);
     const pending = loadedSeasons.find((item) => item.status === "finished" && !item.class_movement_applied_at);
     setSelectedSeasonId((current) => current || pending?.id || loadedSeasons[0]?.id || "");
@@ -68,7 +72,7 @@ export default function ClassMovementPanel() {
     const rows = new Map<string, { id: string; name: string; classNumber: number; points: number; sets: number; games: number }>();
     for (const athlete of athletes) {
       if (athlete.status !== "active" && athlete.status !== "licensed") continue;
-      rows.set(athlete.id, { id: athlete.id, name: profileMap[athlete.user_id] || "Atleta", classNumber: athlete.current_class, points: athlete.status === "licensed" ? closedRoundIds.size * 3 : 0, sets: 0, games: 0 });
+      rows.set(athlete.id, { id: athlete.id, name: profileMap[athlete.user_id] || "Atleta", classNumber: athlete.current_class, points: 0, sets: 0, games: 0 });
     }
     for (const match of matches) {
       if (match.season_id !== selectedSeason.id || !closedRoundIds.has(match.round_id) || !completedStatuses.includes(match.status)) continue;
@@ -84,6 +88,11 @@ export default function ClassMovementPanel() {
         two.games += (match.athlete_two_games ?? 0) - (match.athlete_one_games ?? 0);
       }
     }
+    for (const event of matchEvents) {
+      if (event.season_id !== selectedSeason.id || !closedRoundIds.has(event.round_id)) continue;
+      const row = rows.get(event.athlete_id);
+      if (row) row.points += event.points;
+    }
     const result: Decision[] = [];
     for (let classNumber = 1; classNumber <= 7; classNumber += 1) {
       const ranking = [...rows.values()].filter((row) => row.classNumber === classNumber).sort((a, b) => b.points - a.points || b.sets - a.sets || b.games - a.games || a.name.localeCompare(b.name));
@@ -94,7 +103,7 @@ export default function ClassMovementPanel() {
       });
     }
     return result;
-  }, [selectedSeason, rounds, athletes, matches, profileMap]);
+  }, [selectedSeason, rounds, athletes, matches, matchEvents, profileMap]);
 
   const metrics = useMemo(() => ({
     active: athletes.filter((athlete) => athlete.status === "active").length,

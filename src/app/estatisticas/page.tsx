@@ -76,9 +76,9 @@ export default function EstatisticasPage() {
     if (matchQueries.some((query) => query.error)) { setError("Não foi possível carregar os resultados das partidas."); setLoading(false); return; }
     const allMatches = matchQueries.flatMap((query) => (query.data ?? []) as Match[]).filter((match) => athleteIds.includes(match.athlete_one_id) || (match.athlete_two_id ? athleteIds.includes(match.athlete_two_id) : false));
     const eventQuery = athleteIds.length
-      ? await supabase.from("match_events").select("season_id,round_id,athlete_id,event_type,points").in("athlete_id", athleteIds).eq("event_type", "bye")
+      ? await supabase.from("match_events").select("season_id,round_id,athlete_id,event_type,points").in("athlete_id", athleteIds).in("event_type", ["bye", "licensed"])
       : { data: [], error: null };
-    if (eventQuery.error) { setError("Não foi possível carregar os pontos de BYE."); setLoading(false); return; }
+    if (eventQuery.error) { setError("Não foi possível carregar pontos extras da classificação."); setLoading(false); return; }
     setSeasons(loadedSeasons); setRounds((roundQuery.data ?? []) as Round[]); setAthletes(loadedAthletes); setClasses((classQuery.data ?? []) as SeasonClass[]); setMatches(allMatches); setMatchEvents((eventQuery.data ?? []) as MatchEvent[]); setUpdatedAt(new Date().toLocaleTimeString("pt-BR")); setLoading(false);
   }, [supabase]);
 

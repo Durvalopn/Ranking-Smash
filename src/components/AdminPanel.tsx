@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { buildRoundDraw, type DrawAthlete, type ExistingMatch } from "@/lib/round-draw";
@@ -51,6 +51,8 @@ type Props = {
 type DbAthlete = DrawAthlete;
 type DbMatch = ExistingMatch & { id: string; round_id: string; result_type: string | null };
 type DbRound = { id: string; round_number: number; status: AdminRound["status"] };
+type LicensedAthlete = { id: string };
+type RoundParticipant = { athlete_one_id: string; athlete_two_id: string | null };
 
 const statusLabel: Record<string, string> = {
   registration: "Em inscrição",
@@ -87,6 +89,7 @@ export default function AdminPanel({
   const [movementBusy, setMovementBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const reconciledRounds = useRef(new Set<string>());
 
   const season = seasons.find((item) => item.id === seasonId);
   const seasonRounds = useMemo(
@@ -106,6 +109,76 @@ export default function AdminPanel({
     setMessage("");
     setError("");
   }
+
+  async function recordLicensedPoints(roundId: string, roundNumber: number) {
+    if (!season) throw new Error("Selecione uma temporada antes de registrar os pontos.");
+
+    const [athleteResult, assignmentResult, matchResult, eventResult] = await Promise.all([
+      db.from("athletes").select("id").eq("status", "licensed"),
+      db.from("season_athlete_classes").select("athlete_id").eq("season_id", season.id),
+      db.from("matches").select("athlete_one_id,athlete_two_id").eq("round_id", roundId),
+      db.from("match_events").select("athlete_id").eq("round_id", roundId).eq("event_type", "licensed"),
+    ]);
+    if (athleteResult.error) throw new Error(`Não foi possível consultar os atletas licenciados: ${athleteResult.error.message}`);
+    if (assignmentResult.error) throw new Error(`Não foi possível consultar os atletas inscritos na temporada: ${assignmentResult.error.message}`);
+    if (matchResult.error) throw new Error(`Não foi possível consultar os participantes da Rodada ${roundNumber}: ${matchResult.error.message}`);
+    if (eventResult.error) throw new Error(`Não foi possível consultar os pontos de licenciamento: ${eventResult.error.message}`);
+
+    const assignedAthletes = new Set(((assignmentResult.data ?? []) as { athlete_id: string }[]).map((assignment) => assignment.athlete_id));
+    const participants = new Set(
+      ((matchResult.data ?? []) as RoundParticipant[]).flatMap((match) =>
+        [match.athlete_one_id, match.athlete_two_id].filter((athleteId): athleteId is string => Boolean(athleteId)),
+      ),
+    );
+    const alreadyCredited = new Set(((eventResult.data ?? []) as { athlete_id: string }[]).map((event) => event.athlete_id));
+    const credits = ((athleteResult.data ?? []) as LicensedAthlete[])
+      .filter((athlete) => assignedAthletes.has(athlete.id) && !participants.has(athlete.id) && !alreadyCredited.has(athlete.id))
+      .map((athlete) => ({
+        id: crypto.randomUUID(),
+        season_id: season.id,
+        round_id: roundId,
+        match_id: null,
+        athlete_id: athlete.id,
+        event_type: "licensed",
+        points: 3,
+        set_balance_delta: 0,
+        game_balance_delta: 0,
+        wins_delta: 0,
+        losses_delta: 0,
+        metadata: { source: "licensed_status", round_number: roundNumber },
+        created_at: new Date().toISOString(),
+      }));
+
+    if (!credits.length) return;
+    const { error: insertError } = await db.from("match_events").insert(credits);
+    if (insertError) {
+      throw new Error(`Não foi possível registrar os pontos dos licenciados na Rodada ${roundNumber}: ${insertError.message}`);
+    }
+  }
+
+  useEffect(() => {
+    if (!season) return;
+    const closedRounds = seasonRounds.filter((round) => ["closed", "finished"].includes(round.status));
+    void (async () => {
+      for (const round of closedRounds) {
+        const reconciliationKey = `${season.id}:${round.id}`;
+        if (reconciledRounds.current.has(reconciliationKey)) continue;
+        reconciledRounds.current.add(reconciliationKey);
+        try {
+          await recordLicensedPoints(round.id, round.number);
+        } catch (reconciliationError) {
+          reconciledRounds.current.delete(reconciliationKey);
+          throw reconciliationError;
+        }
+      }
+      const { error: standingsError } = await db.rpc("refresh_season_standings", { p_season_id: season.id });
+      if (standingsError) {
+        throw new Error(`Não foi possível atualizar a classificação dos licenciados: ${standingsError.message}`);
+      }
+    })().catch((reconciliationError) => {
+      setError(reconciliationError instanceof Error ? reconciliationError.message : "Não foi possível reconciliar os pontos dos licenciados.");
+    });
+  }, [season, seasonRounds]);
 
   async function generateRound() {
     clearFeedback();
@@ -141,6 +214,13 @@ export default function AdminPanel({
       const roundNumber = openRound?.round_number ?? Math.max(0, ...liveRounds.map((round) => round.round_number)) + 1;
       if (roundNumber > (season.roundsCount ?? 0)) {
         throw new Error(`A temporada já atingiu o limite de ${season.roundsCount ?? 0} rodadas.`);
+      }
+
+      const closedRounds = [...liveRounds]
+        .filter((round) => ["closed", "finished"].includes(round.status))
+        .sort((left, right) => right.round_number - left.round_number);
+      for (const closedRound of closedRounds) {
+        await recordLicensedPoints(closedRound.id, closedRound.round_number);
       }
 
       const { data: athleteRows, error: athletesError } = await db
@@ -315,6 +395,8 @@ export default function AdminPanel({
           `Ainda há ${pendingMatches.length} partida(s) sem resultado na Rodada ${current.number}. Lance todos os resultados antes de encerrar.`,
         );
       }
+
+      await recordLicensedPoints(current.id, current.number);
 
       const { data: closedRound, error: closeError } = await db
         .from("rounds")
