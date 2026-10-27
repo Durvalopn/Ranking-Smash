@@ -209,7 +209,7 @@ export default function AdminPanel({
         athlete_two_id: pair.athleteTwoId,
         draw_order: pair.drawOrder,
         status: pair.isBye ? "completed" : "scheduled",
-        result_type: pair.isBye ? "bye" : "normal",
+        result_type: pair.isBye ? "bye" : null,
         athlete_one_sets: 0,
         athlete_two_sets: 0,
         athlete_one_games: 0,
@@ -226,10 +226,8 @@ export default function AdminPanel({
       }));
       const { error: drawError } = await db.from("matches").insert(matchRows);
       if (drawError) {
-        throw new Error(
-          `A Rodada ${roundNumber} foi criada, mas as partidas não foram gravadas. ` +
-            `Corrija o erro e tente novamente: ${drawError.message}`,
-        );
+        const details = [drawError.message, drawError.details, drawError.hint].filter(Boolean).join(" ");
+        throw new Error(`Não foi possível gravar as partidas da Rodada ${roundNumber}. ${details}`);
       }
 
       const { error: standingsError } = await db.rpc("refresh_season_standings", { p_season_id: season.id });
@@ -245,7 +243,16 @@ export default function AdminPanel({
       }
       await onRefresh?.();
     } catch (generationError) {
-      setError(generationError instanceof Error ? generationError.message : "Não foi possível gerar a rodada.");
+      const errorMessage = generationError instanceof Error ? generationError.message : "Não foi possível gerar a rodada.";
+      setError(errorMessage);
+      if (onRefresh) {
+        try {
+          await onRefresh();
+        } catch (refreshError) {
+          const refreshMessage = refreshError instanceof Error ? refreshError.message : "erro desconhecido";
+          setError(`${errorMessage} O painel também não pôde ser atualizado: ${refreshMessage}`);
+        }
+      }
     } finally {
       setGenerating(false);
     }
