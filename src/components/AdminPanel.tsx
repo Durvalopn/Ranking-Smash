@@ -83,6 +83,7 @@ export default function AdminPanel({
       "",
   );
   const [generating, setGenerating] = useState(false);
+  const [closingRound, setClosingRound] = useState(false);
   const [movementBusy, setMovementBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -288,6 +289,64 @@ export default function AdminPanel({
     }
   }
 
+  async function closeRound() {
+    clearFeedback();
+    if (!season || !current || current.status !== "open") {
+      setError("Selecione uma temporada com uma rodada aberta para encerrá-la.");
+      return;
+    }
+
+    setClosingRound(true);
+    try {
+      const { data: roundMatches, error: matchesError } = await db
+        .from("matches")
+        .select("id,status")
+        .eq("season_id", season.id)
+        .eq("round_id", current.id);
+      if (matchesError) throw new Error(`Não foi possível verificar os resultados da rodada: ${matchesError.message}`);
+      if (!roundMatches?.length) throw new Error(`A Rodada ${current.number} não tem partidas para encerrar.`);
+
+      const pendingMatches = roundMatches.filter(
+        (match: { id: string; status: string }) =>
+          !["completed", "confirmed", "result_submitted", "walkover"].includes(match.status),
+      );
+      if (pendingMatches.length) {
+        throw new Error(
+          `Ainda há ${pendingMatches.length} partida(s) sem resultado na Rodada ${current.number}. Lance todos os resultados antes de encerrar.`,
+        );
+      }
+
+      const { data: closedRound, error: closeError } = await db
+        .from("rounds")
+        .update({ status: "closed" })
+        .eq("id", current.id)
+        .eq("status", "open")
+        .select("id")
+        .maybeSingle();
+      if (closeError) throw new Error(`Não foi possível encerrar a Rodada ${current.number}: ${closeError.message}`);
+      if (!closedRound) throw new Error("A rodada deixou de estar aberta ou você não tem permissão para encerrá-la.");
+
+      const { error: standingsError } = await db.rpc("refresh_season_standings", { p_season_id: season.id });
+      if (standingsError) {
+        setError(`Rodada ${current.number} encerrada, mas não foi possível atualizar a classificação: ${standingsError.message}`);
+      } else {
+        setMessage(`Rodada ${current.number} encerrada com sucesso.`);
+      }
+      await onRefresh?.();
+    } catch (closeError) {
+      const errorMessage = closeError instanceof Error ? closeError.message : "Não foi possível encerrar a rodada.";
+      setError(errorMessage);
+      try {
+        await onRefresh?.();
+      } catch (refreshError) {
+        const refreshMessage = refreshError instanceof Error ? refreshError.message : "erro desconhecido";
+        setError(`${errorMessage} O painel também não pôde ser atualizado: ${refreshMessage}`);
+      }
+    } finally {
+      setClosingRound(false);
+    }
+  }
+
   async function applyMovement() {
     clearFeedback();
     if (!season || season.status !== "finished") {
@@ -323,10 +382,11 @@ export default function AdminPanel({
         </button>
         <button
           type="button"
-          disabled={!current || current.status !== "open"}
+          onClick={() => void closeRound()}
+          disabled={closingRound || generating || !current || current.status !== "open"}
           className="rounded-lg border border-amber-400/50 px-4 py-2 font-semibold text-amber-200 disabled:opacity-40"
         >
-          Fechar rodada
+          {closingRound ? "Fechando rodada..." : "Fechar rodada"}
         </button>
         <button
           type="button"
