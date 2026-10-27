@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import type { Database } from "@/types/database";
 
@@ -58,6 +59,28 @@ export async function GET() {
 
   const athleteRows = (athletes ?? []) as Athlete[];
   const userIds = [...new Set(athleteRows.map((athlete) => athlete.user_id))];
+  let authUsers: { id: string; user_metadata: Record<string, unknown> }[];
+  try {
+    const adminClient = createAdminClient();
+    const { data, error: usersError } = await adminClient.auth.admin.listUsers({ page: 1, perPage: 1000 });
+    if (usersError) throw usersError;
+    authUsers = data.users.map((authUser) => ({
+      id: authUser.id,
+      user_metadata: authUser.user_metadata ?? {},
+    }));
+  } catch (error) {
+    logTechnicalError("falha ao consultar datas de nascimento nos metadados do Supabase Auth", error);
+    return NextResponse.json(
+      { error: "Não foi possível consultar as datas de nascimento dos atletas." },
+      { status: 500 },
+    );
+  }
+  const birthDates = new Map(
+    authUsers.map((authUser) => [
+      authUser.id,
+      typeof authUser.user_metadata.birth_date === "string" ? authUser.user_metadata.birth_date : null,
+    ]),
+  );
   const profileNames = new Map<string, string>();
   if (userIds.length > 0) {
     try {
@@ -83,6 +106,7 @@ export async function GET() {
     return {
       ...athlete,
       status: athlete.status === "ativo" ? "active" : athlete.status,
+      birth_date: birthDates.get(athlete.user_id) ?? null,
       name: profileNames.get(athlete.user_id) ||
         (isCurrentUser ? currentUserName : null) ||
         `Atleta ${athlete.user_id.slice(0, 8)}`,

@@ -65,7 +65,7 @@ type DbRound = { id: string; round_number: number; status: AdminRound["status"] 
 type LicensedAthlete = { id: string };
 type RoundParticipant = { athlete_one_id: string; athlete_two_id: string | null };
 type SeasonClassAssignment = { athlete_id: string; class_number: number };
-type DrawProfile = { id: string; birth_date: string | null };
+type DrawIdentity = { id: string; birth_date: string | null };
 type DrawMatchEvent = { round_id: string; athlete_id: string; event_type: string; points: number };
 
 const completedMatchStatuses = new Set(["result_submitted", "completed", "confirmed", "walkover"]);
@@ -345,25 +345,28 @@ export default function AdminPanel({
       const [athleteResult, assignmentResult, profileResult, eventResult] = await Promise.all([
         db.from("athletes").select("id,user_id,current_class,status").in("status", ["active", "licensed"]).order("id", { ascending: true }),
         db.from("season_athlete_classes").select("athlete_id,class_number").eq("season_id", season.id),
-        db.from("profiles").select("id,birth_date"),
+        fetch("/api/admin/athletes/identities", { cache: "no-store" }),
         db.from("match_events").select("round_id,athlete_id,event_type,points").eq("season_id", season.id).in("event_type", ["bye", "licensed"]),
       ]);
       if (athleteResult.error) throw new Error(`Não foi possível carregar os atletas: ${athleteResult.error.message}`);
       if (assignmentResult.error) throw new Error(`Não foi possível consultar as classes da temporada: ${assignmentResult.error.message}`);
-      if (profileResult.error) throw new Error(`Não foi possível consultar as datas de nascimento: ${profileResult.error.message}`);
       if (eventResult.error) throw new Error(`Não foi possível consultar os pontos adicionais: ${eventResult.error.message}`);
+      const identityPayload = await profileResult.json().catch(() => ({}));
+      if (!profileResult.ok) {
+        throw new Error(identityPayload.error ?? "Não foi possível consultar as datas de nascimento dos atletas.");
+      }
 
       const athletes = (athleteResult.data ?? []) as DbAthlete[];
       const seasonClassByAthlete = new Map(
         ((assignmentResult.data ?? []) as SeasonClassAssignment[]).map((assignment) => [assignment.athlete_id, assignment.class_number]),
       );
-      const birthDateByProfile = new Map(
-        ((profileResult.data ?? []) as DrawProfile[]).map((profile) => [profile.id, profile.birth_date]),
+      const birthDateByAthlete = new Map(
+        ((identityPayload.athletes ?? []) as DrawIdentity[]).map((identity) => [identity.id, identity.birth_date]),
       );
       const drawAthletes = athletes.map((athlete) => ({
         ...athlete,
         current_class: seasonClassByAthlete.get(athlete.id) ?? athlete.current_class,
-        birth_date: birthDateByProfile.get(athlete.user_id) ?? null,
+        birth_date: birthDateByAthlete.get(athlete.id) ?? null,
         points: 0,
         set_balance: 0,
         game_balance: 0,
