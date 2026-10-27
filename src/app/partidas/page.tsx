@@ -19,6 +19,7 @@ const pendingStatuses=["scheduled","pending","awaiting_result","contested"];
 
 function statusLabel(match:Match){
  if(pendingStatuses.includes(match.status)) return "Aguardando resultado";
+ if(!match.athlete_two_id&&match.result_type==="double_walkover") return "BYE";
  if(match.result_type==="bye") return "BYE";
  if(match.result_type==="double_walkover") return "WO duplo";
  if(match.result_type==="walkover") return "Finalizada por WO";
@@ -26,6 +27,7 @@ function statusLabel(match:Match){
 }
 function resultText(match:Match){
  if(pendingStatuses.includes(match.status)) return "O resultado ainda não foi lançado.";
+ if(!match.athlete_two_id&&match.result_type==="double_walkover") return "7 pontos · sem alteração no saldo de sets ou games";
  if(match.result_type==="bye") return `${match.athlete_one_points??0} pontos · sem alteração no saldo de sets ou games`;
  if(match.result_type==="double_walkover") return "Nenhum atleta venceu esta partida.";
  if(match.result_type==="walkover") return "Partida finalizada por WO.";

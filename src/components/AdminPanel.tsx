@@ -49,7 +49,7 @@ type Props = {
 };
 
 type DbAthlete = DrawAthlete;
-type DbMatch = ExistingMatch & { round_id: string };
+type DbMatch = ExistingMatch & { id: string; round_id: string; result_type: string | null };
 type DbRound = { id: string; round_number: number; status: AdminRound["status"] };
 
 const statusLabel: Record<string, string> = {
@@ -125,7 +125,7 @@ export default function AdminPanel({
       const liveRounds = (roundRows ?? []) as DbRound[];
       const { data: existingMatches, error: matchesError } = await db
         .from("matches")
-        .select("round_id,athlete_one_id,athlete_two_id")
+        .select("id,round_id,athlete_one_id,athlete_two_id,result_type")
         .eq("season_id", season.id);
       if (matchesError) throw new Error(`Não foi possível consultar os confrontos anteriores: ${matchesError.message}`);
 
@@ -202,6 +202,7 @@ export default function AdminPanel({
       }
 
       const matchRows = draw.map((pair) => ({
+        id: crypto.randomUUID(),
         season_id: season.id,
         round_id: roundId,
         class_number: pair.classNumber,
@@ -209,12 +210,12 @@ export default function AdminPanel({
         athlete_two_id: pair.athleteTwoId,
         draw_order: pair.drawOrder,
         status: pair.isBye ? "completed" : "scheduled",
-        result_type: pair.isBye ? "bye" : null,
+        result_type: pair.isBye ? "double_walkover" : "normal",
         athlete_one_sets: 0,
         athlete_two_sets: 0,
         athlete_one_games: 0,
         athlete_two_games: 0,
-        athlete_one_points: pair.isBye ? 7 : 0,
+        athlete_one_points: 0,
         athlete_two_points: 0,
         winner_athlete_id: null,
         seed,
@@ -224,10 +225,39 @@ export default function AdminPanel({
         created_at: now,
         updated_at: now,
       }));
-      const { error: drawError } = await db.from("matches").insert(matchRows);
+      const { data: insertedMatches, error: drawError } = await db.from("matches").insert(matchRows).select("id");
       if (drawError) {
         const details = [drawError.message, drawError.details, drawError.hint].filter(Boolean).join(" ");
         throw new Error(`Não foi possível gravar as partidas da Rodada ${roundNumber}. ${details}`);
+      }
+      if (insertedMatches?.length !== matchRows.length) {
+        throw new Error(`Foram gravadas ${insertedMatches?.length ?? 0} de ${matchRows.length} partidas da Rodada ${roundNumber}.`);
+      }
+
+      const byeEvents = matchRows
+        .filter((match) => match.result_type === "double_walkover")
+        .map((match) => ({
+          id: crypto.randomUUID(),
+          season_id: season.id,
+          round_id: roundId,
+          match_id: match.id,
+          athlete_id: match.athlete_one_id,
+          event_type: "bye",
+          points: 7,
+          set_balance_delta: 0,
+          game_balance_delta: 0,
+          wins_delta: 0,
+          losses_delta: 0,
+          metadata: { seed, generated_by: "admin_panel" },
+          created_at: now,
+        }));
+      if (byeEvents.length) {
+        const { error: eventsError } = await db.from("match_events").insert(byeEvents);
+        if (eventsError) {
+          throw new Error(
+            `As partidas foram criadas, mas os pontos dos BYEs não foram registrados: ${eventsError.message}`,
+          );
+        }
       }
 
       const { error: standingsError } = await db.rpc("refresh_season_standings", { p_season_id: season.id });

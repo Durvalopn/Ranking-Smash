@@ -10,6 +10,7 @@ type Round = { id: string; season_id: string; round_number: number; name: string
 type Athlete = { id: string; user_id: string; current_class: number | null };
 type SeasonClass = { season_id: string; athlete_id: string; class_number: number };
 type Match = { id: string; season_id: string; round_id: string; class_number: number; status: string; result_type: string | null; athlete_one_id: string; athlete_two_id: string | null; athlete_one_sets: number | null; athlete_two_sets: number | null; athlete_one_games: number | null; athlete_two_games: number | null; athlete_one_points: number | null; athlete_two_points: number | null; winner_athlete_id: string | null };
+type MatchEvent = { season_id: string; round_id: string; athlete_id: string; event_type: string; points: number };
 type Stat = { matches: number; wins: number; losses: number; points: number; setsWon: number; setsLost: number; gamesWon: number; gamesLost: number; walkovers: number; doubleWalkovers: number };
 type SeasonStat = Stat & { season: Season; classNumbers: number[]; roundsPlayed: number; roundsTotal: number };
 
@@ -26,7 +27,7 @@ function addMatch(stat: Stat, match: Match, athleteId: string) {
   stat.gamesWon += first ? match.athlete_one_games ?? 0 : match.athlete_two_games ?? 0;
   stat.gamesLost += first ? match.athlete_two_games ?? 0 : match.athlete_one_games ?? 0;
   if (match.result_type === "walkover") stat.walkovers += 1;
-  if (match.result_type === "double_walkover") stat.doubleWalkovers += 1;
+  if (match.result_type === "double_walkover" && match.athlete_two_id) stat.doubleWalkovers += 1;
   if (!["double_walkover", "bye"].includes(match.result_type ?? "") && match.winner_athlete_id) {
     if (match.winner_athlete_id === athleteId) stat.wins += 1;
     else stat.losses += 1;
@@ -51,6 +52,7 @@ export default function EstatisticasPage() {
   const [athletes, setAthletes] = useState<Athlete[]>([]);
   const [classes, setClasses] = useState<SeasonClass[]>([]);
   const [matches, setMatches] = useState<Match[]>([]);
+  const [matchEvents, setMatchEvents] = useState<MatchEvent[]>([]);
   const [selectedId, setSelectedId] = useState("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -73,13 +75,17 @@ export default function EstatisticasPage() {
     const matchQueries = await Promise.all(loadedSeasons.map((season) => supabase.from("matches").select("id,season_id,round_id,class_number,status,result_type,athlete_one_id,athlete_two_id,athlete_one_sets,athlete_two_sets,athlete_one_games,athlete_two_games,athlete_one_points,athlete_two_points,winner_athlete_id").eq("season_id", season.id)));
     if (matchQueries.some((query) => query.error)) { setError("Não foi possível carregar os resultados das partidas."); setLoading(false); return; }
     const allMatches = matchQueries.flatMap((query) => (query.data ?? []) as Match[]).filter((match) => athleteIds.includes(match.athlete_one_id) || (match.athlete_two_id ? athleteIds.includes(match.athlete_two_id) : false));
-    setSeasons(loadedSeasons); setRounds((roundQuery.data ?? []) as Round[]); setAthletes(loadedAthletes); setClasses((classQuery.data ?? []) as SeasonClass[]); setMatches(allMatches); setUpdatedAt(new Date().toLocaleTimeString("pt-BR")); setLoading(false);
+    const eventQuery = athleteIds.length
+      ? await supabase.from("match_events").select("season_id,round_id,athlete_id,event_type,points").in("athlete_id", athleteIds).eq("event_type", "bye")
+      : { data: [], error: null };
+    if (eventQuery.error) { setError("Não foi possível carregar os pontos de BYE."); setLoading(false); return; }
+    setSeasons(loadedSeasons); setRounds((roundQuery.data ?? []) as Round[]); setAthletes(loadedAthletes); setClasses((classQuery.data ?? []) as SeasonClass[]); setMatches(allMatches); setMatchEvents((eventQuery.data ?? []) as MatchEvent[]); setUpdatedAt(new Date().toLocaleTimeString("pt-BR")); setLoading(false);
   }, [supabase]);
 
   useEffect(() => { void load(); const timer = window.setInterval(() => void load(), 15000); const onFocus = () => void load(); window.addEventListener("focus", onFocus); return () => { window.clearInterval(timer); window.removeEventListener("focus", onFocus); }; }, [load]);
 
   const athleteIds = useMemo(() => new Set(athletes.map((athlete) => athlete.id)), [athletes]);
-  const seasonStats = useMemo<SeasonStat[]>(() => seasons.map((season) => { const seasonRounds = rounds.filter((round) => round.season_id === season.id); const includedRounds = season.season_type === "finals" ? seasonRounds.filter((round) => round.status === "closed") : seasonRounds.filter((round) => round.status === "closed"); const stat = emptyStat(); const classNumbers = [...new Set(classes.filter((item) => item.season_id === season.id && athleteIds.has(item.athlete_id)).map((item) => item.class_number))]; for (const match of matches) { if (match.season_id !== season.id || !includedRounds.some((round) => round.id === match.round_id) || !finishedStatuses.includes(match.status)) continue; const athleteId = athleteIds.has(match.athlete_one_id) ? match.athlete_one_id : match.athlete_two_id; if (athleteId) addMatch(stat, match, athleteId); } return { ...stat, season, classNumbers, roundsPlayed: includedRounds.length, roundsTotal: seasonRounds.length }; }).filter((item) => item.matches > 0 || item.roundsTotal > 0), [seasons, rounds, matches, classes, athleteIds]);
+  const seasonStats = useMemo<SeasonStat[]>(() => seasons.map((season) => { const seasonRounds = rounds.filter((round) => round.season_id === season.id); const includedRounds = seasonRounds.filter((round) => round.status === "closed"); const stat = emptyStat(); const classNumbers = [...new Set(classes.filter((item) => item.season_id === season.id && athleteIds.has(item.athlete_id)).map((item) => item.class_number))]; for (const match of matches) { if (match.season_id !== season.id || !includedRounds.some((round) => round.id === match.round_id) || !finishedStatuses.includes(match.status)) continue; const athleteId = athleteIds.has(match.athlete_one_id) ? match.athlete_one_id : match.athlete_two_id; if (athleteId) addMatch(stat, match, athleteId); } for (const event of matchEvents) { if (event.season_id === season.id && includedRounds.some((round) => round.id === event.round_id)) stat.points += event.points; } return { ...stat, season, classNumbers, roundsPlayed: includedRounds.length, roundsTotal: seasonRounds.length }; }).filter((item) => item.matches > 0 || item.roundsTotal > 0), [seasons, rounds, matches, matchEvents, classes, athleteIds]);
   const selectedSeason = selectedId === "all" ? null : seasonStats.find((item) => item.season.id === selectedId) ?? null;
   const total = useMemo(() => { const stat = emptyStat(); for (const item of seasonStats) { stat.matches += item.matches; stat.wins += item.wins; stat.losses += item.losses; stat.points += item.points; stat.setsWon += item.setsWon; stat.setsLost += item.setsLost; stat.gamesWon += item.gamesWon; stat.gamesLost += item.gamesLost; stat.walkovers += item.walkovers; stat.doubleWalkovers += item.doubleWalkovers; } return stat; }, [seasonStats]);
 
