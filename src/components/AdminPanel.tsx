@@ -86,6 +86,7 @@ export default function AdminPanel({
   );
   const [generating, setGenerating] = useState(false);
   const [closingRound, setClosingRound] = useState(false);
+  const [finalizingSeason, setFinalizingSeason] = useState(false);
   const [movementBusy, setMovementBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -99,6 +100,13 @@ export default function AdminPanel({
   const current = seasonRounds.find((round) => round.status === "open") ?? seasonRounds[0];
   const nextRoundNumber = Math.max(0, ...seasonRounds.map((round) => round.number)) + 1;
   const roundLimit = season?.roundsCount ?? 0;
+  const canFinalizeSeason = Boolean(
+    season &&
+      ["active", "closed"].includes(season.status) &&
+      roundLimit > 0 &&
+      seasonRounds.length === roundLimit &&
+      seasonRounds.every((round) => ["closed", "finished"].includes(round.status)),
+  );
   const canGenerate = Boolean(
     season &&
       ["registration", "active"].includes(season.status) &&
@@ -429,6 +437,74 @@ export default function AdminPanel({
     }
   }
 
+  async function finalizeSeason() {
+    clearFeedback();
+    if (!season || !canFinalizeSeason) {
+      setError("Encerre todas as rodadas previstas antes de finalizar a temporada.");
+      return;
+    }
+
+    setFinalizingSeason(true);
+    try {
+      const { data: roundRows, error: roundsError } = await db
+        .from("rounds")
+        .select("id,round_number,status")
+        .eq("season_id", season.id);
+      if (roundsError) throw new Error(`Não foi possível verificar as rodadas da temporada: ${roundsError.message}`);
+      if (
+        !roundRows ||
+        roundRows.length !== roundLimit ||
+        roundRows.some((round: { round_number: number; status: string }) =>
+          round.round_number > roundLimit || !["closed", "finished"].includes(round.status),
+        )
+      ) {
+        throw new Error("Encerre todas as rodadas previstas antes de finalizar a temporada.");
+      }
+
+      const { data: roundMatches, error: matchesError } = await db
+        .from("matches")
+        .select("id,status")
+        .eq("season_id", season.id);
+      if (matchesError) throw new Error(`Não foi possível verificar as partidas da temporada: ${matchesError.message}`);
+      const pendingMatches = (roundMatches ?? []).filter(
+        (match: { id: string; status: string }) =>
+          !["completed", "confirmed", "result_submitted", "walkover"].includes(match.status),
+      );
+      if (pendingMatches.length) {
+        throw new Error(`Ainda há ${pendingMatches.length} partida(s) sem resultado na temporada.`);
+      }
+
+      const { data: finalizedSeason, error: finalizeError } = await db
+        .from("seasons")
+        .update({ status: "finished" })
+        .eq("id", season.id)
+        .in("status", ["active", "closed"])
+        .select("id")
+        .maybeSingle();
+      if (finalizeError) throw new Error(`Não foi possível finalizar a temporada: ${finalizeError.message}`);
+      if (!finalizedSeason) throw new Error("A temporada mudou de estado ou o banco não permitiu finalizá-la.");
+
+      const { error: standingsError } = await db.rpc("refresh_season_standings", { p_season_id: season.id });
+      if (standingsError) {
+        setError(`Temporada finalizada, mas não foi possível atualizar a classificação: ${standingsError.message}`);
+      } else {
+        setMessage(`Temporada ${season.name} ${season.year} finalizada com sucesso.`);
+      }
+      await onRefresh?.();
+    } catch (finalizeError) {
+      const errorMessage = finalizeError instanceof Error ? finalizeError.message : "Não foi possível finalizar a temporada.";
+      setError(errorMessage);
+      try {
+        await onRefresh?.();
+      } catch (refreshError) {
+        const refreshMessage = refreshError instanceof Error ? refreshError.message : "erro desconhecido";
+        setError(`${errorMessage} O painel também não pôde ser atualizado: ${refreshMessage}`);
+      }
+    } finally {
+      setFinalizingSeason(false);
+    }
+  }
+
   async function applyMovement() {
     clearFeedback();
     if (!season || season.status !== "finished") {
@@ -472,10 +548,11 @@ export default function AdminPanel({
         </button>
         <button
           type="button"
-          disabled={!season || season.status !== "closed"}
+          onClick={() => void finalizeSeason()}
+          disabled={finalizingSeason || closingRound || generating || !canFinalizeSeason}
           className="rounded-lg border border-violet-400/50 px-4 py-2 font-semibold text-violet-200 disabled:opacity-40"
         >
-          Finalizar temporada
+          {finalizingSeason ? "Finalizando temporada..." : "Finalizar temporada"}
         </button>
         <button
           type="button"
