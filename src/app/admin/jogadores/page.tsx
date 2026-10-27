@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { RefreshCw } from "lucide-react";
 import Navigation from "@/components/Navigation";
 import { createClient } from "@/lib/supabase/client";
 import type { AthleteStatus, Database } from "@/types/database";
@@ -66,6 +67,11 @@ export default function AdminPlayersPage() {
   const [savingId, setSavingId] = useState("");
 
   async function load() {
+    setLoading(true);
+    setAthleteLoadError("");
+    setSeasonLoadError(false);
+    setRoundLoadError(false);
+    setMatchesLoadError(false);
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     const isAdmin = Boolean(user && (
@@ -227,9 +233,21 @@ export default function AdminPlayersPage() {
               <h1 className="text-3xl font-bold text-white">Jogadores</h1>
               <p className="mt-2 text-slate-400">Atletas organizados por classe e participação na rodada vigente.</p>
             </div>
-            <div className="text-right text-sm text-slate-400">
-              <p>{seasonLabel}</p>
-              <p>{roundLabel}</p>
+            <div className="flex items-center gap-4">
+              <button
+                type="button"
+                onClick={() => void load()}
+                disabled={!authorized || loading}
+                aria-label="Atualizar jogadores"
+                title="Atualizar jogadores"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-slate-700 text-slate-300 transition hover:border-emerald-500 hover:text-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <RefreshCw size={17} className={loading ? "animate-spin" : ""} />
+              </button>
+              <div className="text-right text-sm text-slate-400">
+                <p>{seasonLabel}</p>
+                <p>{roundLabel}</p>
+              </div>
             </div>
           </div>
           {loading ? (

@@ -45,12 +45,23 @@ export async function GET() {
     return NextResponse.json({ error: "Acesso permitido somente ao administrador." }, { status: 403 });
   }
 
-  const { data: athletes, error: athleteError } = await supabase
+  let adminClient: ReturnType<typeof createAdminClient>;
+  try {
+    adminClient = createAdminClient();
+  } catch (error) {
+    logTechnicalError("falha ao criar cliente administrativo", error);
+    return NextResponse.json(
+      { error: "Não foi possível consultar a lista administrativa de atletas." },
+      { status: 500 },
+    );
+  }
+
+  const { data: athletes, error: athleteError } = await adminClient
     .from("athletes")
     .select("id,user_id,current_class,status")
     .order("current_class");
   if (athleteError) {
-    logTechnicalError("falha ao consultar atletas com a sessão autenticada e as políticas RLS", athleteError);
+    logTechnicalError("falha ao consultar atletas", athleteError);
     return NextResponse.json(
       { error: "Não foi possível consultar a lista de atletas. Verifique as permissões administrativas." },
       { status: 500 },
@@ -62,7 +73,6 @@ export async function GET() {
   let authUsers: { id: string; user_metadata: Record<string, unknown> }[] = [];
   let birthDateWarning: string | null = null;
   try {
-    const adminClient = createAdminClient();
     const { data, error: usersError } = await adminClient.auth.admin.listUsers({ page: 1, perPage: 1000 });
     if (usersError) throw usersError;
     authUsers = data.users.map((authUser) => ({
@@ -82,7 +92,7 @@ export async function GET() {
   const profileNames = new Map<string, string>();
   if (userIds.length > 0) {
     try {
-      const { data: profiles, error: profileError } = await supabase
+      const { data: profiles, error: profileError } = await adminClient
         .from("profiles")
         .select("id,full_name")
         .in("id", userIds);
