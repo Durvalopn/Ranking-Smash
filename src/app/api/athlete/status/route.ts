@@ -54,6 +54,67 @@ async function hasFirstRoundBeenDrawn(db: StatusClient) {
   return (count ?? 0) > 0;
 }
 
+async function recordLicensedPointsForOpenRounds(athleteId: string) {
+  const db = createAdminClient() as any;
+  const { data: seasons, error: seasonsError } = await db
+    .from("seasons")
+    .select("id")
+    .eq("status", "active");
+  if (seasonsError) throw seasonsError;
+
+  for (const season of seasons ?? []) {
+    const { data: round, error: roundError } = await db
+      .from("rounds")
+      .select("id,round_number")
+      .eq("season_id", season.id)
+      .eq("status", "open")
+      .order("round_number", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (roundError) throw roundError;
+    if (!round) continue;
+
+    const { data: assignment, error: assignmentError } = await db
+      .from("season_athlete_classes")
+      .select("athlete_id")
+      .eq("season_id", season.id)
+      .eq("athlete_id", athleteId)
+      .maybeSingle();
+    if (assignmentError) throw assignmentError;
+    if (!assignment) continue;
+
+    const [{ data: matches, error: matchesError }, { data: existingEvents, error: eventsError }] = await Promise.all([
+      db.from("matches").select("athlete_one_id,athlete_two_id").eq("round_id", round.id),
+      db.from("match_events").select("id").eq("season_id", season.id).eq("round_id", round.id).eq("athlete_id", athleteId).eq("event_type", "licensed"),
+    ]);
+    if (matchesError) throw matchesError;
+    if (eventsError) throw eventsError;
+
+    const alreadyParticipating = (matches ?? []).some(
+      (match: { athlete_one_id: string; athlete_two_id: string | null }) =>
+        match.athlete_one_id === athleteId || match.athlete_two_id === athleteId,
+    );
+    if (alreadyParticipating || existingEvents?.length) continue;
+
+    const { error: insertError } = await db.from("match_events").insert({
+      id: crypto.randomUUID(),
+      season_id: season.id,
+      round_id: round.id,
+      match_id: null,
+      athlete_id: athleteId,
+      event_type: "licensed",
+      points: 3,
+      set_balance_delta: 0,
+      game_balance_delta: 0,
+      wins_delta: 0,
+      losses_delta: 0,
+      metadata: { source: "licensed_status", round_number: round.round_number },
+      created_at: new Date().toISOString(),
+    });
+    if (insertError) throw insertError;
+  }
+}
+
 export async function PATCH(request: Request) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -109,6 +170,17 @@ export async function PATCH(request: Request) {
     if (error) {
       return NextResponse.json({ error: "Não foi possível atualizar o status do jogador." }, { status: 500 });
     }
+    if (status === "licensed") {
+      try {
+        await recordLicensedPointsForOpenRounds(athlete.id);
+      } catch (creditError) {
+        console.error("[athlete/status] status atualizado, mas não foi possível registrar os pontos de licenciamento", creditError);
+        return NextResponse.json(
+          { error: "Status atualizado, mas os 3 pontos não foram registrados. Tente novamente ou confira a classificação." },
+          { status: 500 },
+        );
+      }
+    }
     return NextResponse.json({ status });
   }
 
@@ -158,6 +230,17 @@ export async function PATCH(request: Request) {
       { error: "O banco não permitiu atualizar este atleta. Verifique a política RLS de athletes para o próprio usuário." },
       { status: 403 },
     );
+  }
+  if (status === "licensed") {
+    try {
+      await recordLicensedPointsForOpenRounds(athlete.id);
+    } catch (creditError) {
+      console.error("[athlete/status] status atualizado, mas não foi possível registrar os pontos de licenciamento", creditError);
+      return NextResponse.json(
+        { error: "Status atualizado, mas os 3 pontos não foram registrados. Tente novamente ou confira a classificação." },
+        { status: 500 },
+      );
+    }
   }
   return NextResponse.json({ status });
 }

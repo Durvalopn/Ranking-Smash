@@ -515,6 +515,8 @@ export default function AdminPanel({
         }
       }
 
+      await recordLicensedPoints(roundId, roundNumber);
+
       const { error: standingsError } = await db.rpc("refresh_season_standings", { p_season_id: season.id });
       const byeCount = draw.filter((pair) => pair.isBye).length;
       const drawMessage =
