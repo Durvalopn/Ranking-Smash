@@ -59,7 +59,8 @@ export async function GET() {
 
   const athleteRows = (athletes ?? []) as Athlete[];
   const userIds = [...new Set(athleteRows.map((athlete) => athlete.user_id))];
-  let authUsers: { id: string; user_metadata: Record<string, unknown> }[];
+  let authUsers: { id: string; user_metadata: Record<string, unknown> }[] = [];
+  let birthDateWarning: string | null = null;
   try {
     const adminClient = createAdminClient();
     const { data, error: usersError } = await adminClient.auth.admin.listUsers({ page: 1, perPage: 1000 });
@@ -70,10 +71,7 @@ export async function GET() {
     }));
   } catch (error) {
     logTechnicalError("falha ao consultar datas de nascimento nos metadados do Supabase Auth", error);
-    return NextResponse.json(
-      { error: "Não foi possível consultar as datas de nascimento dos atletas." },
-      { status: 500 },
-    );
+    birthDateWarning = "Não foi possível consultar as idades; o desempate etário não foi aplicado nesta rodada.";
   }
   const birthDates = new Map(
     authUsers.map((authUser) => [
@@ -113,9 +111,15 @@ export async function GET() {
       email: isCurrentUser ? user.email ?? null : null,
     };
   });
+  if (!birthDateWarning) {
+    const missingBirthDates = responseAthletes.filter((athlete) => !athlete.birth_date).length;
+    if (missingBirthDates > 0) {
+      birthDateWarning = `${missingBirthDates} atleta(s) sem data de nascimento; o desempate etário não foi aplicado para eles.`;
+    }
+  }
 
   return NextResponse.json(
-    { athletes: responseAthletes },
+    { athletes: responseAthletes, warning: birthDateWarning },
     { headers: { "Cache-Control": "no-store, private" } },
   );
 }

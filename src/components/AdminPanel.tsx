@@ -355,6 +355,7 @@ export default function AdminPanel({
       if (!profileResult.ok) {
         throw new Error(identityPayload.error ?? "Não foi possível consultar as datas de nascimento dos atletas.");
       }
+      const birthDateWarning = typeof identityPayload.warning === "string" ? identityPayload.warning : null;
 
       const athletes = (athleteResult.data ?? []) as DbAthlete[];
       const seasonClassByAthlete = new Map(
@@ -520,10 +521,11 @@ export default function AdminPanel({
         `Rodada ${roundNumber} gerada com ${draw.length} partida(s)` +
         (byeCount ? ` e ${byeCount} BYE(s)` : "") +
         ".";
+      const finalDrawMessage = birthDateWarning ? `${drawMessage} ${birthDateWarning}` : drawMessage;
       if (standingsError) {
-        setError(`${drawMessage} Não foi possível atualizar a classificação: ${standingsError.message}`);
+        setError(`${finalDrawMessage} Não foi possível atualizar a classificação: ${standingsError.message}`);
       } else {
-        setMessage(drawMessage);
+        setMessage(finalDrawMessage);
       }
       await onRefresh?.();
     } catch (generationError) {
