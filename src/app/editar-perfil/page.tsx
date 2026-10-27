@@ -28,6 +28,8 @@ export default function EditarPerfilPage() {
   const [form, setForm] = useState<FormData>({ fullName: "", birthDate: "", phone: "", classNumber: "" });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [classChangeAvailable, setClassChangeAvailable] = useState(false);
+  const [initialClassNumber, setInitialClassNumber] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -41,18 +43,30 @@ export default function EditarPerfilPage() {
       }
 
       const metadata = user.user_metadata ?? {};
-      const { data: athlete } = (await supabase
-        .from("athletes")
-        .select("current_class")
-        .eq("user_id", user.id)
-        .maybeSingle()) as unknown as AthleteQueryResult;
+      const [{ data: athlete }, { data: seasons, error: seasonsError }] = await Promise.all([
+        supabase
+          .from("athletes")
+          .select("current_class")
+          .eq("user_id", user.id)
+          .maybeSingle() as unknown as Promise<AthleteQueryResult>,
+        supabase.from("seasons").select("id").limit(1),
+      ]);
+
+      if (seasonsError) {
+        setError("Não foi possível verificar se já existem temporadas. A classe ficará bloqueada.");
+      } else {
+        setClassChangeAvailable((seasons ?? []).length === 0);
+      }
+
+      const classNumber = normalizeClass(athlete?.current_class ?? metadata.class_number);
 
       setForm({
         fullName: metadata.full_name ?? "",
         birthDate: metadata.birth_date ?? "",
         phone: metadata.phone ?? "",
-        classNumber: normalizeClass(athlete?.current_class ?? metadata.class_number),
+        classNumber,
       });
+      setInitialClassNumber(classNumber);
       setLoading(false);
     };
 
@@ -78,12 +92,27 @@ export default function EditarPerfilPage() {
       return;
     }
 
+    const { data: seasons, error: seasonsError } = await supabase.from("seasons").select("id").limit(1);
+    if (seasonsError) {
+      setError("Não foi possível verificar se a classe ainda pode ser alterada. Tente novamente.");
+      setSaving(false);
+      return;
+    }
+
+    const canChangeClass = (seasons ?? []).length === 0;
+    if (!canChangeClass && form.classNumber !== initialClassNumber) {
+      setError("A classe não pode mais ser alterada porque o administrador já criou uma temporada.");
+      setClassChangeAvailable(false);
+      setSaving(false);
+      return;
+    }
+
     const { error: updateError } = await supabase.auth.updateUser({
       data: {
         full_name: form.fullName.trim(),
         birth_date: form.birthDate,
         phone: form.phone.trim(),
-        class_number: form.classNumber,
+        ...(canChangeClass ? { class_number: form.classNumber } : {}),
       },
     });
 
@@ -93,15 +122,17 @@ export default function EditarPerfilPage() {
       return;
     }
 
-    const athleteTable = supabase.from("athletes") as unknown as AthleteUpdateTable;
-    const { error: athleteError } = await athleteTable
-      .update({ current_class: Number(form.classNumber) })
-      .eq("user_id", user.id);
+    if (canChangeClass && form.classNumber !== initialClassNumber) {
+      const athleteTable = supabase.from("athletes") as unknown as AthleteUpdateTable;
+      const { error: athleteError } = await athleteTable
+        .update({ current_class: Number(form.classNumber) })
+        .eq("user_id", user.id);
 
-    if (athleteError) {
-      setError("Os dados da conta foram salvos, mas não foi possível atualizar a classe do atleta.");
-      setSaving(false);
-      return;
+      if (athleteError) {
+        setError("Os dados da conta foram salvos, mas não foi possível atualizar a classe do atleta.");
+        setSaving(false);
+        return;
+      }
     }
 
     setSuccess("Perfil atualizado com sucesso.");
@@ -142,10 +173,15 @@ export default function EditarPerfilPage() {
 
           <label className="block text-sm text-slate-300">
             Classe que você joga
-            <select value={form.classNumber} onChange={(event) => update("classNumber", event.target.value)} required className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-emerald-400">
+            <select value={form.classNumber} onChange={(event) => update("classNumber", event.target.value)} required disabled={!classChangeAvailable} className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-emerald-400 disabled:cursor-not-allowed disabled:opacity-60">
               <option value="">Selecione sua classe</option>
               {classes.map((item) => <option key={item} value={String(item)}>{item === 7 ? "Feminino" : `${item}ª Classe`}</option>)}
             </select>
+            {!classChangeAvailable && (
+              <span className="mt-2 block text-xs text-slate-400">
+                A classe só pode ser alterada antes da criação da primeira temporada pelo administrador.
+              </span>
+            )}
           </label>
 
           <button type="submit" disabled={saving} className="w-full rounded-lg bg-emerald-500 px-4 py-3 font-semibold text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60">
