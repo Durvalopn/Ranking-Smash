@@ -2,6 +2,7 @@
 
 import {
   useEffect,
+  useRef,
   useState,
   type ChangeEvent,
   type FormEvent,
@@ -87,6 +88,7 @@ export default function CadastroPage() {
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const isSubmittingRef = useRef(false);
   const [isCheckingSession, setIsCheckingSession] = useState(true);
   const passwordValidation = getPasswordValidation(form.password);
 
@@ -135,11 +137,12 @@ export default function CadastroPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (isLoading) return;
+    if (isLoading || isSubmittingRef.current) return;
     setErrorMessage("");
     setSuccessMessage("");
     const validationError = validateForm();
     if (validationError) { setErrorMessage(validationError); return; }
+    isSubmittingRef.current = true;
     setIsLoading(true);
     const normalizedEmail = form.email.trim().toLowerCase();
     const normalizedPhone = form.phone.replace(/\D/g, "");
@@ -168,6 +171,7 @@ export default function CadastroPage() {
     } catch {
       setErrorMessage("Ocorreu um erro inesperado. Aguarde alguns instantes e tente novamente.");
     } finally {
+      isSubmittingRef.current = false;
       setIsLoading(false);
     }
   }
