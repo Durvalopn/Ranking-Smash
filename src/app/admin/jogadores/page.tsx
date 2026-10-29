@@ -18,6 +18,7 @@ const statusLabels: Record<AthleteStatus, string> = {
 type Athlete = Pick<Database["public"]["Tables"]["athletes"]["Row"], "id" | "user_id" | "current_class" | "status"> & {
   name: string;
   email: string | null;
+  phone: string | null;
 };
 type Season = Pick<Database["public"]["Tables"]["seasons"]["Row"], "id" | "name" | "year" | "status">;
 type Round = Pick<Database["public"]["Tables"]["rounds"]["Row"], "id" | "season_id" | "round_number" | "status">;
@@ -105,7 +106,7 @@ export default function AdminPlayersPage() {
     const athleteCount = Array.isArray(athleteResult?.athletes) ? athleteResult.athletes.length : 0;
     console.info("[admin/jogadores] resposta da rota de identidades", {
       status: athleteResponse.status,
-      body: sanitizeDiagnosticBody(athleteResult),
+      body: athleteResult?.athletes ? { athleteCount } : sanitizeDiagnosticBody(athleteResult),
       athleteCount,
     });
     if (!athleteResponse.ok) {
@@ -211,6 +212,25 @@ export default function AdminPlayersPage() {
     }
   }
 
+  async function changeClass(athleteId: string, currentClass: number) {
+    setSavingId(athleteId);
+    setActionError("");
+    try {
+      const response = await fetch("/api/admin/athletes/class", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ athleteId, currentClass }),
+      });
+      const result = await response.json().catch(() => null) as { error?: string } | null;
+      if (!response.ok) setActionError(result?.error ?? "Não foi possível atualizar a classe.");
+      else setAthletes((current) => current.map((athlete) => athlete.id === athleteId ? { ...athlete, current_class: currentClass } : athlete));
+    } catch {
+      setActionError("Não foi possível atualizar a classe.");
+    } finally {
+      setSavingId("");
+    }
+  }
+
   const seasonLabel = seasonLoadError
     ? "Temporada indisponível"
     : currentSeason
@@ -269,11 +289,13 @@ export default function AdminPlayersPage() {
                     <p className="mt-3 text-sm text-slate-500">Nenhum jogador nesta classe.</p>
                   ) : (
                     <div className="mt-3 overflow-x-auto">
-                      <table className="w-full min-w-[720px] text-left text-sm">
+                      <table className="w-full min-w-[960px] text-left text-sm">
                         <thead className="text-xs uppercase text-slate-500">
                           <tr>
                             <th className="py-2 pr-4">Nome</th>
                             <th className="py-2 pr-4">E-mail</th>
+                            <th className="py-2 pr-4">Telefone</th>
+                            <th className="py-2 pr-4">Classe</th>
                             <th className="py-2 pr-4">Status</th>
                             <th className="py-2">Rodada vigente</th>
                           </tr>
@@ -290,6 +312,20 @@ export default function AdminPlayersPage() {
                               <tr key={athlete.id} className="border-t border-slate-800 text-slate-300">
                                 <td className="py-3 pr-4 font-medium text-white">{athlete.name}</td>
                                 <td className="py-3 pr-4">{athlete.email || "E-mail indisponível"}</td>
+                                <td className="py-3 pr-4">{athlete.phone || "Telefone indisponível"}</td>
+                                <td className="py-3 pr-4">
+                                  <select
+                                    value={athlete.current_class}
+                                    disabled={savingId === athlete.id}
+                                    onChange={(event) => void changeClass(athlete.id, Number(event.target.value))}
+                                    aria-label={`Classe de ${athlete.name}`}
+                                    className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 text-sm text-white disabled:opacity-50"
+                                  >
+                                    {Array.from({ length: 7 }, (_, index) => index + 1).map((classNumber) => (
+                                      <option key={classNumber} value={classNumber}>{classLabel(classNumber)}</option>
+                                    ))}
+                                  </select>
+                                </td>
                                 <td className="py-3 pr-4">
                                   <select
                                     value={athlete.status}

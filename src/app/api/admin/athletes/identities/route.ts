@@ -11,7 +11,7 @@ type Athlete = Omit<
   Pick<Database["public"]["Tables"]["athletes"]["Row"], "id" | "user_id" | "current_class" | "status">,
   "status"
 > & { status: string };
-type Profile = Pick<Database["public"]["Tables"]["profiles"]["Row"], "id" | "full_name">;
+type Profile = Pick<Database["public"]["Tables"]["profiles"]["Row"], "id" | "email" | "full_name" | "phone">;
 
 function metadataName(metadata: Record<string, unknown>) {
   for (const key of ["full_name", "name", "display_name"]) {
@@ -70,13 +70,14 @@ export async function GET() {
 
   const athleteRows = (athletes ?? []) as Athlete[];
   const userIds = [...new Set(athleteRows.map((athlete) => athlete.user_id))];
-  let authUsers: { id: string; user_metadata: Record<string, unknown> }[] = [];
+  let authUsers: { id: string; email: string | null; user_metadata: Record<string, unknown> }[] = [];
   let birthDateWarning: string | null = null;
   try {
     const { data, error: usersError } = await adminClient.auth.admin.listUsers({ page: 1, perPage: 1000 });
     if (usersError) throw usersError;
     authUsers = data.users.map((authUser) => ({
       id: authUser.id,
+      email: authUser.email ?? null,
       user_metadata: authUser.user_metadata ?? {},
     }));
   } catch (error) {
@@ -89,18 +90,21 @@ export async function GET() {
       typeof authUser.user_metadata.birth_date === "string" ? authUser.user_metadata.birth_date : null,
     ]),
   );
+  const authUserById = new Map(authUsers.map((authUser) => [authUser.id, authUser]));
   const profileNames = new Map<string, string>();
+  const profileContacts = new Map<string, { email: string; phone: string | null }>();
   if (userIds.length > 0) {
     try {
       const { data: profiles, error: profileError } = await adminClient
         .from("profiles")
-        .select("id,full_name")
+        .select("id,email,full_name,phone")
         .in("id", userIds);
       if (profileError) {
         logTechnicalError("falha ao consultar nomes em profiles; a lista será mantida", profileError);
       } else {
         for (const profile of (profiles ?? []) as Profile[]) {
           if (profile.full_name?.trim()) profileNames.set(profile.id, profile.full_name.trim());
+          profileContacts.set(profile.id, { email: profile.email, phone: profile.phone });
         }
       }
     } catch (error) {
@@ -115,10 +119,13 @@ export async function GET() {
       ...athlete,
       status: athlete.status === "ativo" ? "active" : athlete.status,
       birth_date: birthDates.get(athlete.user_id) ?? null,
+      phone: typeof authUserById.get(athlete.user_id)?.user_metadata.phone === "string"
+        ? authUserById.get(athlete.user_id)?.user_metadata.phone
+        : profileContacts.get(athlete.user_id)?.phone ?? null,
       name: profileNames.get(athlete.user_id) ||
         (isCurrentUser ? currentUserName : null) ||
         `Atleta ${athlete.user_id.slice(0, 8)}`,
-      email: isCurrentUser ? user.email ?? null : null,
+      email: authUserById.get(athlete.user_id)?.email || profileContacts.get(athlete.user_id)?.email || null,
     };
   });
   if (!birthDateWarning) {
