@@ -115,17 +115,19 @@ export async function GET() {
   const currentUserName = metadataName(user.user_metadata) || user.email?.split("@")[0] || null;
   const responseAthletes = athleteRows.map((athlete) => {
     const isCurrentUser = athlete.user_id === user.id;
+    const authUser = authUserById.get(athlete.user_id);
     return {
       ...athlete,
       status: athlete.status === "ativo" ? "active" : athlete.status,
       birth_date: birthDates.get(athlete.user_id) ?? null,
-      phone: typeof authUserById.get(athlete.user_id)?.user_metadata.phone === "string"
-        ? authUserById.get(athlete.user_id)?.user_metadata.phone
+      phone: typeof authUser?.user_metadata.phone === "string"
+        ? authUser.user_metadata.phone
         : profileContacts.get(athlete.user_id)?.phone ?? null,
       name: profileNames.get(athlete.user_id) ||
+        metadataName(authUser?.user_metadata ?? {}) ||
         (isCurrentUser ? currentUserName : null) ||
         `Atleta ${athlete.user_id.slice(0, 8)}`,
-      email: authUserById.get(athlete.user_id)?.email || profileContacts.get(athlete.user_id)?.email || null,
+      email: authUser?.email || profileContacts.get(athlete.user_id)?.email || null,
     };
   });
   if (!birthDateWarning) {
