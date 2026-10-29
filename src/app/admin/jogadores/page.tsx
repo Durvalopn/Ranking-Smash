@@ -231,6 +231,47 @@ export default function AdminPlayersPage() {
     }
   }
 
+  async function changeEmail(athlete: Athlete) {
+    const email = window.prompt(`Novo e-mail de ${athlete.name}:`, athlete.email ?? "")?.trim();
+    if (!email || email === athlete.email) return;
+    setSavingId(athlete.id);
+    setActionError("");
+    try {
+      const response = await fetch("/api/admin/athletes/account", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ athleteId: athlete.id, email }),
+      });
+      const result = await response.json().catch(() => null) as { error?: string; email?: string } | null;
+      if (!response.ok) setActionError(result?.error ?? "Não foi possível alterar o e-mail.");
+      else setAthletes((current) => current.map((item) => item.id === athlete.id ? { ...item, email: result?.email ?? email } : item));
+    } catch {
+      setActionError("Não foi possível alterar o e-mail.");
+    } finally {
+      setSavingId("");
+    }
+  }
+
+  async function deleteAthlete(athlete: Athlete) {
+    if (!window.confirm(`Excluir definitivamente ${athlete.name} (${athlete.email ?? "sem e-mail"})? Esta ação não pode ser desfeita.`)) return;
+    setSavingId(athlete.id);
+    setActionError("");
+    try {
+      const response = await fetch("/api/admin/athletes/account", {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ athleteId: athlete.id }),
+      });
+      const result = await response.json().catch(() => null) as { error?: string } | null;
+      if (!response.ok) setActionError(result?.error ?? "Não foi possível excluir o jogador.");
+      else setAthletes((current) => current.filter((item) => item.id !== athlete.id));
+    } catch {
+      setActionError("Não foi possível excluir o jogador.");
+    } finally {
+      setSavingId("");
+    }
+  }
+
   const seasonLabel = seasonLoadError
     ? "Temporada indisponível"
     : currentSeason
@@ -289,7 +330,7 @@ export default function AdminPlayersPage() {
                     <p className="mt-3 text-sm text-slate-500">Nenhum jogador nesta classe.</p>
                   ) : (
                     <div className="mt-3 overflow-x-auto">
-                      <table className="w-full min-w-[960px] text-left text-sm">
+                      <table className="w-full min-w-[1180px] text-left text-sm">
                         <thead className="text-xs uppercase text-slate-500">
                           <tr>
                             <th className="py-2 pr-4">Nome</th>
@@ -297,7 +338,8 @@ export default function AdminPlayersPage() {
                             <th className="py-2 pr-4">Telefone</th>
                             <th className="py-2 pr-4">Classe</th>
                             <th className="py-2 pr-4">Status</th>
-                            <th className="py-2">Rodada vigente</th>
+                            <th className="py-2 pr-4">Rodada vigente</th>
+                            <th className="py-2">Ações</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -338,8 +380,28 @@ export default function AdminPlayersPage() {
                                     ))}
                                   </select>
                                 </td>
-                                <td className="py-3">
+                                <td className="py-3 pr-4">
                                   <span className={participates ? "text-emerald-300" : "text-slate-500"}>{participationLabel}</span>
+                                </td>
+                                <td className="py-3">
+                                  <div className="flex gap-2">
+                                    <button
+                                      type="button"
+                                      disabled={savingId === athlete.id}
+                                      onClick={() => void changeEmail(athlete)}
+                                      className="rounded-md border border-slate-700 px-2 py-1.5 text-xs text-slate-200 hover:border-emerald-500 disabled:opacity-50"
+                                    >
+                                      Alterar e-mail
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={savingId === athlete.id}
+                                      onClick={() => void deleteAthlete(athlete)}
+                                      className="rounded-md border border-red-500/40 px-2 py-1.5 text-xs text-red-300 hover:bg-red-500/10 disabled:opacity-50"
+                                    >
+                                      Excluir
+                                    </button>
+                                  </div>
                                 </td>
                               </tr>
                             );
